@@ -1,5 +1,6 @@
-import * as d3 from 'd3';
 import './styles/main.scss';
+import { buildTreeLayout } from './tree/layout.js';
+import { createTreeRenderer } from './tree/renderer.js';
 
 const DATA_URL = '/data/famille-herbaut.json';
 
@@ -21,50 +22,6 @@ async function fetchData() {
     throw new Error(`Impossible de charger les donn\u00e9es (statut ${response.status})`);
   }
   return response.json();
-}
-
-function buildHierarchy(individuals) {
-  const generations = new Map();
-
-  individuals.forEach((person) => {
-    const generationKey = person.generation ?? 'inconnue';
-    if (!generations.has(generationKey)) {
-      generations.set(generationKey, []);
-    }
-    generations.get(generationKey).push(person);
-  });
-
-  const sortedGenerations = Array.from(generations.entries()).sort((a, b) => {
-    const [keyA] = a;
-    const [keyB] = b;
-    const numA = Number.parseInt(keyA, 10);
-    const numB = Number.parseInt(keyB, 10);
-
-    if (Number.isNaN(numA) && Number.isNaN(numB)) {
-      return keyA.localeCompare(keyB);
-    }
-    if (Number.isNaN(numA)) {
-      return 1;
-    }
-    if (Number.isNaN(numB)) {
-      return -1;
-    }
-    return numA - numB;
-  });
-
-  const children = sortedGenerations.map(([generationKey, persons]) => ({
-    name: generationKey === 'inconnue' ? 'G\u00e9n\u00e9ration inconnue' : `G\u00e9n\u00e9ration ${generationKey}`,
-    generation: generationKey,
-    children: persons.map((person) => ({
-      name: person.name ?? person.id,
-      person
-    }))
-  }));
-
-  return {
-    name: 'Famille Herbaut',
-    children
-  };
 }
 
 function renderLayout(individuals) {
@@ -103,8 +60,31 @@ function renderLayout(individuals) {
         </div>
       </aside>
       <section class="tree-view" aria-label="Arbre g\u00e9n\u00e9alogique">
+        <header class="tree-view__toolbar">
+          <div class="tree-toolbar">
+            <div class="tree-toolbar__controls" role="group" aria-label="Contr\u00f4les du zoom">
+              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arri\u00e8re">\u2212</button>
+              <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="R\u00e9initialiser la vue">R\u00e9initialiser</button>
+              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-in" aria-label="Zoom avant">+</button>
+            </div>
+            <div class="tree-legend" aria-hidden="true">
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--branch"></span>
+                <span class="tree-legend__label">Branche familiale</span>
+              </div>
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--union"></span>
+                <span class="tree-legend__label">Union / Mariage</span>
+              </div>
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--focus"></span>
+                <span class="tree-legend__label">Individu s\u00e9lectionn\u00e9</span>
+              </div>
+            </div>
+          </div>
+        </header>
         <div class="tree-view__canvas" tabindex="0">
-          <svg class="tree-view__svg" role="img"></svg>
+          <svg class="tree-view__svg" role="presentation"></svg>
         </div>
       </section>
     </div>
@@ -117,112 +97,10 @@ function renderLayout(individuals) {
     generationSelect: appElement.querySelector('select[name="generation"]'),
     resultsList: appElement.querySelector('.search-panel__list'),
     treeCanvas: appElement.querySelector('.tree-view__canvas'),
-    treeSvg: appElement.querySelector('.tree-view__svg')
-  };
-}
-
-function renderTree(svgElement, canvasElement, hierarchyData, { onPersonSelected }) {
-  const margin = { top: 40, right: 160, bottom: 40, left: 160 };
-  const width = Math.max(canvasElement.clientWidth, 960);
-  const nodeCount = d3.hierarchy(hierarchyData).descendants().length;
-  const height = Math.max(600, nodeCount * 20);
-
-  const svg = d3.select(svgElement);
-  svg.selectAll('*').remove();
-  svg.attr('viewBox', [0, 0, width, height]);
-
-  const root = d3.hierarchy(hierarchyData);
-  const treeLayout = d3.tree().size([height - margin.top - margin.bottom, width - margin.left - margin.right]);
-  treeLayout(root);
-
-  const g = svg
-    .append('g')
-    .attr('class', 'tree-view__group')
-    .attr('transform', `translate(${margin.left}, ${margin.top})`);
-
-  const linkGenerator = d3
-    .linkHorizontal()
-    .x((d) => d.y)
-    .y((d) => d.x);
-
-  g.append('g')
-    .attr('class', 'tree-view__links')
-    .selectAll('path')
-    .data(root.links())
-    .join('path')
-    .attr('d', linkGenerator);
-
-  const personNodes = new Map();
-
-  const nodes = g
-    .append('g')
-    .attr('class', 'tree-view__nodes')
-    .selectAll('g')
-    .data(root.descendants())
-    .join('g')
-    .attr('transform', (d) => `translate(${d.y}, ${d.x})`)
-    .attr('class', (d) => {
-      const classes = ['tree-node'];
-      if (d.data.person) {
-        classes.push('tree-node--person');
-      } else {
-        classes.push('tree-node--group');
-      }
-      return classes.join(' ');
-    });
-
-  nodes
-    .append('circle')
-    .attr('class', 'tree-node__marker')
-    .attr('r', (d) => (d.data.person ? 5 : 7));
-
-  nodes
-    .append('text')
-    .attr('class', 'tree-node__label')
-    .attr('dy', '0.32em')
-    .attr('x', (d) => (d.children ? -12 : 12))
-    .attr('text-anchor', (d) => (d.children ? 'end' : 'start'))
-    .text((d) => d.data.name);
-
-  nodes.each(function (d) {
-    if (!d.data.person) {
-      return;
-    }
-    this.setAttribute('role', 'button');
-    this.setAttribute('tabindex', '0');
-    this.setAttribute('data-person-id', d.data.person.id);
-    this.setAttribute('aria-label', `Afficher les d\u00e9tails de ${d.data.person.name ?? d.data.person.id}`);
-    personNodes.set(d.data.person.id, this);
-  });
-
-  function handleNodeEvent(event, datum) {
-    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') {
-      return;
-    }
-    event.preventDefault();
-    onPersonSelected?.(datum.data.person);
-  }
-
-  nodes
-    .filter((d) => Boolean(d.data.person))
-    .on('click', handleNodeEvent)
-    .on('keydown', handleNodeEvent);
-
-  return {
-    highlightPerson(personId) {
-      nodes.classed('tree-node--highlight', false);
-      const nodeElement = personNodes.get(personId);
-      if (!nodeElement) {
-        return;
-      }
-      d3.select(nodeElement).classed('tree-node--highlight', true);
-      const nodeBox = nodeElement.getBoundingClientRect();
-      const canvasBox = canvasElement.getBoundingClientRect();
-      const offsetX = nodeBox.x + nodeBox.width / 2 - (canvasBox.x + canvasBox.width / 2);
-      const offsetY = nodeBox.y + nodeBox.height / 2 - (canvasBox.y + canvasBox.height / 2);
-      canvasElement.scrollBy({ left: offsetX, top: offsetY, behavior: 'smooth' });
-      nodeElement.focus({ preventScroll: true });
-    }
+    treeSvg: appElement.querySelector('.tree-view__svg'),
+    zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
+    zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
+    resetViewButton: appElement.querySelector('[data-tree-action="reset"]')
   };
 }
 
@@ -281,7 +159,7 @@ function createSearchResult(person, onSelect) {
   return item;
 }
 
-function setupSearch(formElements, individuals, { onPersonSelected, highlightPerson }) {
+function setupSearch(formElements, individuals, { onPersonSelected, focusOnIndividual }) {
   const { form, nameInput, sosaInput, generationSelect, resultsList } = formElements;
 
   function filterResults() {
@@ -300,7 +178,7 @@ function setupSearch(formElements, individuals, { onPersonSelected, highlightPer
     resultsList.innerHTML = '';
     filtered.slice(0, 20).forEach((person) => {
       const item = createSearchResult(person, (selectedPerson) => {
-        highlightPerson(selectedPerson.id);
+        focusOnIndividual(selectedPerson.id);
         onPersonSelected(selectedPerson);
       });
       resultsList.appendChild(item);
@@ -315,20 +193,37 @@ async function init() {
   try {
     const data = await fetchData();
     const individuals = Array.isArray(data.individuals) ? data.individuals : [];
-    const hierarchyData = buildHierarchy(individuals);
+    const relationships = Array.isArray(data.relationships) ? data.relationships : [];
+    const layout = buildTreeLayout(individuals, relationships);
     const formElements = renderLayout(individuals);
 
-    const { highlightPerson } = renderTree(formElements.treeSvg, formElements.treeCanvas, hierarchyData, {
+    const treeApi = createTreeRenderer({
+      svgElement: formElements.treeSvg,
+      containerElement: formElements.treeCanvas,
+      layout,
       onPersonSelected: (person) => {
-        highlightPerson(person.id);
         openPersonModal(person);
       }
     });
 
+    if (formElements.zoomInButton) {
+      formElements.zoomInButton.addEventListener('click', () => treeApi.zoomIn());
+    }
+    if (formElements.zoomOutButton) {
+      formElements.zoomOutButton.addEventListener('click', () => treeApi.zoomOut());
+    }
+    if (formElements.resetViewButton) {
+      formElements.resetViewButton.addEventListener('click', () => treeApi.resetView());
+    }
+
     setupSearch(formElements, individuals, {
       onPersonSelected: openPersonModal,
-      highlightPerson
+      focusOnIndividual: (personId) => treeApi.focusOnIndividual(personId)
     });
+
+    if (typeof window !== 'undefined') {
+      window.herbautTree = treeApi;
+    }
   } catch (error) {
     appElement.innerHTML = `
       <div class="app__error">
