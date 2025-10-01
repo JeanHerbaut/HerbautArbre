@@ -1,3 +1,5 @@
+@use './tree';
+
 :root {
   color-scheme: light dark;
   --color-background: #f5f5f5;
@@ -134,70 +136,6 @@ body {
   outline: none;
 }
 
-.tree-view {
-  position: relative;
-  background-color: var(--color-surface);
-  border-radius: 1rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 12px 40px rgba(31, 41, 51, 0.14);
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-}
-
-.tree-view__canvas {
-  flex: 1;
-  overflow: auto;
-  border-radius: 0.75rem;
-  background: linear-gradient(135deg, rgba(240, 200, 8, 0.06), rgba(44, 110, 73, 0.06));
-  padding: 1rem;
-}
-
-.tree-view__svg {
-  width: 100%;
-  height: 100%;
-  min-height: 600px;
-  color: var(--color-muted);
-}
-
-.tree-view__links path {
-  stroke: rgba(44, 110, 73, 0.35);
-  stroke-width: 1.5px;
-}
-
-.tree-node {
-  cursor: default;
-  transition: transform 0.2s ease;
-}
-
-.tree-node--person {
-  cursor: pointer;
-}
-
-.tree-node__marker {
-  fill: var(--color-secondary);
-  stroke: rgba(255, 255, 255, 0.9);
-  stroke-width: 1.5px;
-}
-
-.tree-node--group .tree-node__marker {
-  fill: var(--color-accent);
-  stroke: rgba(255, 255, 255, 0.9);
-}
-
-.tree-node__label {
-  font-size: 0.85rem;
-  fill: var(--color-text);
-  paint-order: stroke;
-  stroke: rgba(255, 255, 255, 0.8);
-  stroke-width: 3px;
-  stroke-linejoin: round;
-}
-
-.tree-node--highlight .tree-node__marker {
-  fill: #f2545b;
-  r: 7;
-}
-
 .tree-node--highlight .tree-node__label {
   font-weight: 700;
   fill: #f2545b;
@@ -264,9 +202,6 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .tree-view {
-    min-height: 540px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
