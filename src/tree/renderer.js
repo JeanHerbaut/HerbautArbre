@@ -173,7 +173,7 @@ function splitLabelLines(label) {
 }
 
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
-  const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds } = layout;
+  const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds, mode } = layout;
 
   const svg = d3.select(svgElement);
   svg.selectAll('*').remove();
@@ -181,6 +181,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   svg.attr('role', 'presentation');
   svg.style('cursor', 'grab');
   svg.style('touch-action', 'none');
+  svg.attr('data-tree-layout', mode ?? 'fan');
 
   const rootGroup = svg.append('g').attr('class', 'tree-canvas__viewport');
   const linksGroup = rootGroup.append('g').attr('class', 'tree-links');
@@ -341,9 +342,15 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     }
     setHighlight(personId);
     const nodeElement = nodeElementMap.get(personId);
+    if (containerElement) {
+      if (typeof containerElement.scrollTo === 'function') {
+        containerElement.scrollTo({ left: 0, top: 0 });
+      } else {
+        containerElement.scrollLeft = 0;
+        containerElement.scrollTop = 0;
+      }
+    }
     const { width, height } = getContainerSize();
-    const scrollLeft = containerElement?.scrollLeft ?? 0;
-    const scrollTop = containerElement?.scrollTop ?? 0;
     const shortestSide = Math.min(width, height);
     const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
       ? shortestSide / FOCUS_TARGET_SPAN
@@ -353,8 +360,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       ZOOM_EXTENT[1],
       Math.max(baseScale, Number.isFinite(currentTransform.k) ? currentTransform.k : 1)
     );
-    const translateX = scrollLeft + width / 2 - node.x * targetScale;
-    const translateY = scrollTop + height / 2 - node.y * targetScale;
+    const translateX = width / 2 - node.x * targetScale;
+    const translateY = height / 2 - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });

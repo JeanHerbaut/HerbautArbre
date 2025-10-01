@@ -1,4 +1,4 @@
-import { cluster, hierarchy } from 'd3';
+import { cluster, hierarchy, tree } from 'd3';
 
 const DEFAULT_RADIAL_GAP = 220;
 const RADIAL_PADDING = 280;
@@ -7,6 +7,10 @@ const FAN_END_ANGLE = (5 * Math.PI) / 6;
 const FAN_ANGLE_RANGE = FAN_END_ANGLE - FAN_START_ANGLE;
 const NODE_BOUNDS_PADDING = 32;
 const BRANCH_COLORS = 6;
+const CARTESIAN_HORIZONTAL_GAP = 260;
+const CARTESIAN_VERTICAL_GAP = 140;
+const CARTESIAN_HORIZONTAL_PADDING = 260;
+const CARTESIAN_VERTICAL_PADDING = 200;
 const NAME_COLLATOR = new Intl.Collator('fr', {
   sensitivity: 'base',
   ignorePunctuation: true
@@ -108,7 +112,7 @@ function selectPrimaryParent(entries) {
   return ranked[0]?.entry.parentNode ?? entries[0].parentNode;
 }
 
-export function buildTreeLayout(individuals = [], relationships = []) {
+function createGraph(individuals = [], relationships = []) {
   const nodesById = new Map();
   individuals.forEach((person) => {
     ensureNode(nodesById, person);
@@ -188,6 +192,105 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     isVirtual: true
   };
 
+  return {
+    nodesById,
+    virtualRoot,
+    additionalRelationships,
+    secondaryRelationships
+  };
+}
+
+function annotateBranches(virtualRoot) {
+  const topLevelChildren = virtualRoot.children.filter((child) => !child.isVirtual);
+  topLevelChildren.forEach((child, index) => {
+    annotateBranch(child, index % BRANCH_COLORS);
+  });
+}
+
+function assignGenerations(nodes) {
+  nodes.forEach((node) => {
+    const declaredGeneration = parseGeneration(node.person?.generation);
+    if (declaredGeneration != null) {
+      node.generation = declaredGeneration;
+    } else {
+      node.generation = Math.max(0, node.depth ?? 0);
+    }
+  });
+}
+
+function buildHierarchicalLinks(nodes) {
+  const links = [];
+  nodes.forEach((node) => {
+    node.children.forEach((child) => {
+      if (child.isVirtual) {
+        return;
+      }
+      links.push({
+        type: 'parent-child',
+        sourceId: node.id,
+        targetId: child.id,
+        source: { x: node.x, y: node.y, angle: node.angle, radius: node.radius },
+        target: { x: child.x, y: child.y, angle: child.angle, radius: child.radius }
+      });
+    });
+  });
+  return links;
+}
+
+function buildRelationshipLinks(nodesById, relationships) {
+  return relationships
+    .map((relation) => {
+      const sourceNode = nodesById.get(relation.source);
+      const targetNode = nodesById.get(relation.target);
+      if (
+        !sourceNode ||
+        !targetNode ||
+        sourceNode.isVirtual ||
+        targetNode.isVirtual ||
+        sourceNode.x == null ||
+        sourceNode.y == null ||
+        targetNode.x == null ||
+        targetNode.y == null
+      ) {
+        return null;
+      }
+      return {
+        type: relation.type,
+        context: relation.context ?? null,
+        sourceId: sourceNode.id,
+        targetId: targetNode.id,
+        source: {
+          x: sourceNode.x,
+          y: sourceNode.y,
+          angle: sourceNode.angle,
+          radius: sourceNode.radius
+        },
+        target: {
+          x: targetNode.x,
+          y: targetNode.y,
+          angle: targetNode.angle,
+          radius: targetNode.radius
+        }
+      };
+    })
+    .filter(Boolean);
+}
+
+function collectRenderableNodes(nodes) {
+  const renderableNodes = nodes.filter((node) => !node.isVirtual);
+  return {
+    nodes: renderableNodes,
+    nodeById: new Map(renderableNodes.map((node) => [node.id, node]))
+  };
+}
+
+function combineRelationships(additionalRelationships, secondaryRelationships) {
+  return additionalRelationships.concat(secondaryRelationships);
+}
+
+function buildFanLayout(graph) {
+  const { nodesById, virtualRoot, additionalRelationships, secondaryRelationships } = graph;
+
   const hierarchyRoot = hierarchy(virtualRoot, (node) => node.children);
   const effectiveDepth = Math.max(1, hierarchyRoot.height - 1);
   const radialLimit = Math.max(DEFAULT_RADIAL_GAP, effectiveDepth * DEFAULT_RADIAL_GAP);
@@ -256,84 +359,134 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     maxY: stats.maxY + NODE_BOUNDS_PADDING
   };
 
-  const topLevelChildren = virtualRoot.children.filter((child) => !child.isVirtual);
-  topLevelChildren.forEach((child, index) => {
-    annotateBranch(child, index % BRANCH_COLORS);
-  });
+  annotateBranches(virtualRoot);
+  assignGenerations(nodes);
 
-  nodes.forEach((node) => {
-    const declaredGeneration = parseGeneration(node.person?.generation);
-    if (declaredGeneration != null) {
-      node.generation = declaredGeneration;
-    } else {
-      node.generation = Math.max(0, node.depth ?? 0);
-    }
-  });
+  const hierarchicalLinks = buildHierarchicalLinks(nodes);
+  const relationshipLinks = buildRelationshipLinks(
+    nodesById,
+    combineRelationships(additionalRelationships, secondaryRelationships)
+  );
 
-  const hierarchicalLinks = [];
-  nodes.forEach((node) => {
-    node.children.forEach((child) => {
-      if (child.isVirtual) {
-        return;
-      }
-      hierarchicalLinks.push({
-        type: 'parent-child',
-        sourceId: node.id,
-        targetId: child.id,
-        source: { x: node.x, y: node.y, angle: node.angle, radius: node.radius },
-        target: { x: child.x, y: child.y, angle: child.angle, radius: child.radius }
-      });
-    });
-  });
-
-  const allRelationships = additionalRelationships.concat(secondaryRelationships);
-  const relationshipLinks = allRelationships
-    .map((relation) => {
-      const sourceNode = nodesById.get(relation.source);
-      const targetNode = nodesById.get(relation.target);
-      if (
-        !sourceNode ||
-        !targetNode ||
-        sourceNode.isVirtual ||
-        targetNode.isVirtual ||
-        sourceNode.x == null ||
-        sourceNode.y == null ||
-        targetNode.x == null ||
-        targetNode.y == null
-      ) {
-        return null;
-      }
-      return {
-        type: relation.type,
-        context: relation.context ?? null,
-        sourceId: sourceNode.id,
-        targetId: targetNode.id,
-        source: {
-          x: sourceNode.x,
-          y: sourceNode.y,
-          angle: sourceNode.angle,
-          radius: sourceNode.radius
-        },
-        target: {
-          x: targetNode.x,
-          y: targetNode.y,
-          angle: targetNode.angle,
-          radius: targetNode.radius
-        }
-      };
-    })
-    .filter(Boolean);
-
-  const renderableNodes = nodes.filter((node) => !node.isVirtual);
-  const renderableNodesMap = new Map(renderableNodes.map((node) => [node.id, node]));
+  const { nodes: renderableNodes, nodeById } = collectRenderableNodes(nodes);
 
   return {
     root: virtualRoot,
     nodes: renderableNodes,
-    nodeById: renderableNodesMap,
+    nodeById,
     hierarchicalLinks,
     relationshipLinks,
     dimensions,
-    bounds
+    bounds,
+    mode: 'fan'
   };
+}
+
+function buildHierarchicalLayout(graph) {
+  const { nodesById, virtualRoot, additionalRelationships, secondaryRelationships } = graph;
+
+  const hierarchyRoot = hierarchy(virtualRoot, (node) => node.children);
+  const cartesianTree = tree()
+    .nodeSize([CARTESIAN_VERTICAL_GAP, CARTESIAN_HORIZONTAL_GAP])
+    .separation((a, b) => (a.parent === b.parent ? 1 : 1.25));
+
+  cartesianTree(hierarchyRoot);
+
+  const nodes = [];
+  const stats = {
+    minX: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY
+  };
+
+  hierarchyRoot.each((hierNode) => {
+    const dataNode = hierNode.data;
+    if (dataNode === virtualRoot) {
+      return;
+    }
+    dataNode.depth = Math.max(0, hierNode.depth - 1);
+    const cartesianX = hierNode.y;
+    const cartesianY = hierNode.x;
+
+    dataNode.angle = null;
+    dataNode.radius = null;
+    dataNode.x = cartesianX;
+    dataNode.y = cartesianY;
+
+    stats.minX = Math.min(stats.minX, cartesianX);
+    stats.maxX = Math.max(stats.maxX, cartesianX);
+    stats.minY = Math.min(stats.minY, cartesianY);
+    stats.maxY = Math.max(stats.maxY, cartesianY);
+
+    nodes.push(dataNode);
+  });
+
+  if (!Number.isFinite(stats.minX)) {
+    stats.minX = 0;
+    stats.maxX = 0;
+  }
+  if (!Number.isFinite(stats.minY)) {
+    stats.minY = 0;
+    stats.maxY = 0;
+  }
+
+  const spanX = Math.max(1, stats.maxX - stats.minX);
+  const spanY = Math.max(1, stats.maxY - stats.minY);
+
+  const offsetX = CARTESIAN_HORIZONTAL_PADDING - stats.minX;
+  const offsetY = CARTESIAN_VERTICAL_PADDING - stats.minY;
+
+  nodes.forEach((node) => {
+    node.x += offsetX;
+    node.y += offsetY;
+  });
+
+  const adjustedMinX = stats.minX + offsetX;
+  const adjustedMaxX = stats.maxX + offsetX;
+  const adjustedMinY = stats.minY + offsetY;
+  const adjustedMaxY = stats.maxY + offsetY;
+
+  const dimensions = {
+    width: spanX + CARTESIAN_HORIZONTAL_PADDING * 2,
+    height: spanY + CARTESIAN_VERTICAL_PADDING * 2
+  };
+
+  const bounds = {
+    minX: adjustedMinX - NODE_BOUNDS_PADDING,
+    maxX: adjustedMaxX + NODE_BOUNDS_PADDING,
+    minY: adjustedMinY - NODE_BOUNDS_PADDING,
+    maxY: adjustedMaxY + NODE_BOUNDS_PADDING
+  };
+
+  annotateBranches(virtualRoot);
+  assignGenerations(nodes);
+
+  const hierarchicalLinks = buildHierarchicalLinks(nodes);
+  const relationshipLinks = buildRelationshipLinks(
+    nodesById,
+    combineRelationships(additionalRelationships, secondaryRelationships)
+  );
+
+  const { nodes: renderableNodes, nodeById } = collectRenderableNodes(nodes);
+
+  return {
+    root: virtualRoot,
+    nodes: renderableNodes,
+    nodeById,
+    hierarchicalLinks,
+    relationshipLinks,
+    dimensions,
+    bounds,
+    mode: 'hierarchical'
+  };
+}
+
+export function buildTreeLayout(individuals = [], relationships = [], options = {}) {
+  const { mode = 'fan' } = options ?? {};
+  const graph = createGraph(individuals, relationships);
+  if (mode === 'hierarchical') {
+    return buildHierarchicalLayout(graph);
+  }
+  return buildFanLayout(graph);
 }

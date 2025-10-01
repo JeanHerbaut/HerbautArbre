@@ -9,6 +9,8 @@ import { formatPersonDisplayName } from './utils/person.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const ROOT_PERSON_ID = 'S_3072';
+const FAN_LAYOUT_QUERY = '(max-width: 768px)';
+const COARSE_POINTER_QUERY = '(pointer: coarse)';
 
 const appElement = document.querySelector('#app');
 const modalElement = document.querySelector('#person-modal');
@@ -29,6 +31,10 @@ async function fetchData() {
   }
   return response.json();
 }
+
+const PLACEHOLDER_NAME_PATTERN = /^Personne\s+/i;
+const BIRTH_NAME_PATTERN = /naissance d['e]\s*([\p{L}\p{M}\s'\-]+?)(?=\s+(?:n'est|est|,|\.|$))/iu;
+const CHRONICLE_NAME_PATTERN = /Chronique familiale de\s+([\p{L}\p{M}\s'\-]+)/iu;
 
 function mergeAnnotationFragments(annotations) {
   if (!Array.isArray(annotations)) {
@@ -61,15 +67,57 @@ function mergeAnnotationFragments(annotations) {
   return merged;
 }
 
+function deriveNameFromAnnotations(annotations) {
+  if (!Array.isArray(annotations)) {
+    return null;
+  }
+  for (const annotation of annotations) {
+    const text = typeof annotation === 'string' ? annotation.trim() : '';
+    if (!text) {
+      continue;
+    }
+    const birthMatch = text.match(BIRTH_NAME_PATTERN);
+    if (birthMatch && birthMatch[1]) {
+      return birthMatch[1].replace(/\s+/g, ' ').trim();
+    }
+  }
+  for (const annotation of annotations) {
+    const text = typeof annotation === 'string' ? annotation.trim() : '';
+    if (!text) {
+      continue;
+    }
+    const chronicleMatch = text.match(CHRONICLE_NAME_PATTERN);
+    if (chronicleMatch && chronicleMatch[1]) {
+      return text.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return null;
+}
+
 function normalizeIndividuals(individuals) {
   return individuals.map((person) => {
     const normalizedAnnotations = mergeAnnotationFragments(person.annotations);
-    if (normalizedAnnotations.length === 0) {
+    const updates = {};
+    if (normalizedAnnotations.length > 0) {
+      updates.annotations = normalizedAnnotations;
+    }
+    const annotationSource = normalizedAnnotations.length > 0
+      ? normalizedAnnotations
+      : Array.isArray(person.annotations)
+      ? person.annotations
+      : [];
+    if (person.name && PLACEHOLDER_NAME_PATTERN.test(person.name)) {
+      const derivedName = deriveNameFromAnnotations(annotationSource);
+      if (derivedName) {
+        updates.name = derivedName;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
       return person;
     }
     return {
       ...person,
-      annotations: normalizedAnnotations
+      ...updates
     };
   });
 }
@@ -170,33 +218,48 @@ async function init() {
     const rawIndividuals = Array.isArray(data.individuals) ? data.individuals : [];
     const individuals = normalizeIndividuals(rawIndividuals);
     const relationships = Array.isArray(data.relationships) ? data.relationships : [];
-    const layout = buildTreeLayout(individuals, relationships);
     const formElements = renderLayout();
+    let treeApi = null;
+    let currentLayoutMode = 'fan';
+    let layoutMediaQuery = null;
 
-    const treeApi = createTreeRenderer({
-      svgElement: formElements.treeSvg,
-      containerElement: formElements.treeCanvas,
-      layout,
-      onPersonSelected: (person) => {
-        openPersonModal(person);
+    const renderTree = (mode, { animateFocus = false } = {}) => {
+      const layout = buildTreeLayout(individuals, relationships, { mode });
+      const previousHighlight = treeApi?.highlightedId ?? ROOT_PERSON_ID;
+      treeApi?.destroy();
+      treeApi = createTreeRenderer({
+        svgElement: formElements.treeSvg,
+        containerElement: formElements.treeCanvas,
+        layout,
+        onPersonSelected: (person) => {
+          openPersonModal(person);
+        }
+      });
+      const targetId = previousHighlight || ROOT_PERSON_ID;
+      const focused = treeApi.focusOnIndividual(targetId, { animate: animateFocus });
+      if (!focused) {
+        treeApi.highlightIndividual(targetId);
       }
-    });
+      if (typeof window !== 'undefined') {
+        window.herbautTree = treeApi;
+      }
+    };
 
     if (formElements.zoomInButton) {
-      formElements.zoomInButton.addEventListener('click', () => treeApi.zoomIn());
+      formElements.zoomInButton.addEventListener('click', () => treeApi?.zoomIn());
     }
     if (formElements.zoomOutButton) {
-      formElements.zoomOutButton.addEventListener('click', () => treeApi.zoomOut());
+      formElements.zoomOutButton.addEventListener('click', () => treeApi?.zoomOut());
     }
     if (formElements.resetViewButton) {
-      formElements.resetViewButton.addEventListener('click', () => treeApi.resetView());
+      formElements.resetViewButton.addEventListener('click', () => treeApi?.resetView());
     }
 
     const searchModal = new SearchModal({
       onSelect: (person) => {
-        const focused = treeApi.focusOnIndividual(person.id);
+        const focused = treeApi?.focusOnIndividual(person.id);
         if (!focused) {
-          treeApi.highlightIndividual(person.id);
+          treeApi?.highlightIndividual(person.id);
         }
       }
     });
@@ -218,19 +281,31 @@ async function init() {
     });
 
     searchPanel.mount(formElements.searchPanelContainer);
-    window.requestAnimationFrame(() => searchPanel.focus());
-
-    const focusRoot = () => {
-      const success = treeApi.focusOnIndividual(ROOT_PERSON_ID, { animate: false });
-      if (!success) {
-        treeApi.highlightIndividual(ROOT_PERSON_ID);
-      }
-    };
-    window.requestAnimationFrame(focusRoot);
+    const shouldAutoFocusSearch =
+      typeof window === 'undefined' ? true : !window.matchMedia(COARSE_POINTER_QUERY).matches;
+    if (shouldAutoFocusSearch && typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => searchPanel.focus());
+    }
 
     if (typeof window !== 'undefined') {
-      window.herbautTree = treeApi;
+      layoutMediaQuery = window.matchMedia(FAN_LAYOUT_QUERY);
+      currentLayoutMode = layoutMediaQuery.matches ? 'fan' : 'hierarchical';
+      const handleLayoutChange = () => {
+        const desiredMode = layoutMediaQuery.matches ? 'fan' : 'hierarchical';
+        if (desiredMode === currentLayoutMode) {
+          return;
+        }
+        currentLayoutMode = desiredMode;
+        renderTree(currentLayoutMode, { animateFocus: false });
+      };
+      if (typeof layoutMediaQuery.addEventListener === 'function') {
+        layoutMediaQuery.addEventListener('change', handleLayoutChange);
+      } else if (typeof layoutMediaQuery.addListener === 'function') {
+        layoutMediaQuery.addListener(handleLayoutChange);
+      }
     }
+
+    renderTree(currentLayoutMode, { animateFocus: false });
   } catch (error) {
     appElement.innerHTML = `
       <div class="app__error">
