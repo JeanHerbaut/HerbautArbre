@@ -6,7 +6,7 @@ import { SearchPanel } from './search/SearchPanel.js';
 import { SearchModal } from './search/SearchModal.js';
 import { filterIndividuals } from './search/filter.js';
 
-const DATA_URL = '/data/famille-herbaut.json';
+const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 
 const appElement = document.querySelector('#app');
 const modalElement = document.querySelector('#person-modal');
