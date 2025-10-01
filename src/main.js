@@ -1,0 +1,184 @@
+import './styles/main.scss';
+import './styles/search.scss';
+import { buildTreeLayout } from './tree/layout.js';
+import { createTreeRenderer } from './tree/renderer.js';
+import { SearchPanel } from './search/SearchPanel.js';
+import { SearchModal } from './search/SearchModal.js';
+import { filterIndividuals } from './search/filter.js';
+
+const DATA_URL = '/data/famille-herbaut.json';
+
+const appElement = document.querySelector('#app');
+const modalElement = document.querySelector('#person-modal');
+const modalTitle = modalElement.querySelector('.modal__title');
+const modalBody = modalElement.querySelector('.modal__body');
+const modalClose = modalElement.querySelector('.modal__close');
+
+modalClose.addEventListener('click', () => modalElement.close());
+modalElement.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  modalElement.close();
+});
+
+async function fetchData() {
+  const response = await fetch(DATA_URL);
+  if (!response.ok) {
+    throw new Error(`Impossible de charger les donn\u00e9es (statut ${response.status})`);
+  }
+  return response.json();
+}
+
+function renderLayout() {
+  appElement.innerHTML = `
+    <div class="app__layout">
+      <aside class="search-panel" aria-labelledby="search-panel-title">
+        <div class="search-panel__container" id="search-panel-container"></div>
+      </aside>
+      <section class="tree-view" aria-label="Arbre généalogique">
+        <header class="tree-view__toolbar">
+          <div class="tree-toolbar">
+            <div class="tree-toolbar__controls" role="group" aria-label="Contrôles du zoom">
+              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arrière">−</button>
+              <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="Réinitialiser la vue">Réinitialiser</button>
+              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-in" aria-label="Zoom avant">+</button>
+            </div>
+            <div class="tree-legend" aria-hidden="true">
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--branch"></span>
+                <span class="tree-legend__label">Branche familiale</span>
+              </div>
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--union"></span>
+                <span class="tree-legend__label">Union / Mariage</span>
+              </div>
+              <div class="tree-legend__item">
+                <span class="tree-legend__marker tree-legend__marker--focus"></span>
+                <span class="tree-legend__label">Individu sélectionné</span>
+              </div>
+            </div>
+          </div>
+        </header>
+        <div class="tree-view__canvas" tabindex="0">
+          <svg class="tree-view__svg" role="presentation"></svg>
+        </div>
+      </section>
+    </div>
+  `;
+
+  return {
+    searchPanelContainer: appElement.querySelector('#search-panel-container'),
+    treeCanvas: appElement.querySelector('.tree-view__canvas'),
+    treeSvg: appElement.querySelector('.tree-view__svg'),
+    zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
+    zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
+    resetViewButton: appElement.querySelector('[data-tree-action="reset"]')
+  };
+}
+
+function formatPersonDetails(person) {
+  const details = [];
+  if (person.name) {
+    details.push(`<strong>Nom</strong> : ${person.name}`);
+  }
+  if (person.sosa) {
+    details.push(`<strong>Num\u00e9ro Sosa</strong> : ${person.sosa}`);
+  }
+  if (person.birth?.date || person.birth?.place) {
+    const birth = [person.birth?.date, person.birth?.place].filter(Boolean).join(' \u2013 ');
+    details.push(`<strong>Naissance</strong> : ${birth}`);
+  }
+  if (person.death?.date || person.death?.place) {
+    const death = [person.death?.date, person.death?.place].filter(Boolean).join(' \u2013 ');
+    details.push(`<strong>D\u00e9c\u00e8s</strong> : ${death}`);
+  }
+  if (person.parents) {
+    const parentDetails = [person.parents.father, person.parents.mother].filter(Boolean).join(', ');
+    if (parentDetails) {
+      details.push(`<strong>Parents</strong> : ${parentDetails}`);
+    }
+  }
+  if (person.spouses) {
+    const spouseDetails = Array.isArray(person.spouses) ? person.spouses.join(', ') : person.spouses;
+    if (spouseDetails) {
+      details.push(`<strong>Conjoints</strong> : ${spouseDetails}`);
+    }
+  }
+  if (Array.isArray(person.annotations) && person.annotations.length > 0) {
+    const annotations = person.annotations.map((annotation) => `<li>${annotation}</li>`).join('');
+    details.push(`<strong>Notes</strong> : <ul class="modal__annotations">${annotations}</ul>`);
+  }
+  return details.join('<br />');
+}
+
+function openPersonModal(person) {
+  modalTitle.textContent = person.name ?? person.id;
+  modalBody.innerHTML = formatPersonDetails(person);
+  if (!modalElement.open) {
+    modalElement.showModal();
+  }
+}
+
+async function init() {
+  try {
+    const data = await fetchData();
+    const individuals = Array.isArray(data.individuals) ? data.individuals : [];
+    const relationships = Array.isArray(data.relationships) ? data.relationships : [];
+    const layout = buildTreeLayout(individuals, relationships);
+    const formElements = renderLayout();
+
+    const treeApi = createTreeRenderer({
+      svgElement: formElements.treeSvg,
+      containerElement: formElements.treeCanvas,
+      layout,
+      onPersonSelected: (person) => {
+        openPersonModal(person);
+      }
+    });
+
+    if (formElements.zoomInButton) {
+      formElements.zoomInButton.addEventListener('click', () => treeApi.zoomIn());
+    }
+    if (formElements.zoomOutButton) {
+      formElements.zoomOutButton.addEventListener('click', () => treeApi.zoomOut());
+    }
+    if (formElements.resetViewButton) {
+      formElements.resetViewButton.addEventListener('click', () => treeApi.resetView());
+    }
+
+    const searchModal = new SearchModal({
+      onSelect: (person) => {
+        treeApi.focusOnIndividual(person.id);
+        openPersonModal(person);
+      }
+    });
+    searchModal.mount(document.body);
+
+    const searchPanel = new SearchPanel({
+      onSearch: (criteria) => {
+        const hasCriteria = Object.values(criteria).some((value) => value && value.length > 0);
+        if (!hasCriteria) {
+          searchModal.close();
+          return;
+        }
+        const results = filterIndividuals(individuals, criteria);
+        searchModal.open(results);
+      }
+    });
+
+    searchPanel.mount(formElements.searchPanelContainer);
+    window.requestAnimationFrame(() => searchPanel.focus());
+
+    if (typeof window !== 'undefined') {
+      window.herbautTree = treeApi;
+    }
+  } catch (error) {
+    appElement.innerHTML = `
+      <div class="app__error">
+        <h1>Erreur de chargement</h1>
+        <p>${error.message}</p>
+      </div>
+    `;
+  }
+}
+
+init();

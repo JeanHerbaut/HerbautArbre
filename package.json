@@ -1,0 +1,25 @@
+{
+  "name": "herbautarbre",
+  "version": "1.0.0",
+  "description": "Jeu de donn\u00e9es g\u00e9n\u00e9alogiques extrait automatiquement du PDF \u00ab\u00a0Famille Herbaut\u00a0\u00bb.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "d3": "^7.9.0"
+  },
+  "devDependencies": {
+    "sass": "^1.93.2",
+    "vite": "^7.1.7"
+  }
+}
