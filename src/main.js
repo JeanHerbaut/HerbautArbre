@@ -5,8 +5,10 @@ import { createTreeRenderer } from './tree/renderer.js';
 import { SearchPanel } from './search/SearchPanel.js';
 import { SearchModal } from './search/SearchModal.js';
 import { filterIndividuals } from './search/filter.js';
+import { formatPersonDisplayName } from './utils/person.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
+const ROOT_PERSON_ID = 'S_3072';
 
 const appElement = document.querySelector('#app');
 const modalElement = document.querySelector('#person-modal');
@@ -155,7 +157,7 @@ function formatPersonDetails(person) {
 }
 
 function openPersonModal(person) {
-  modalTitle.textContent = person.name ?? person.id;
+  modalTitle.textContent = formatPersonDisplayName(person) || person.name || person.id;
   modalBody.innerHTML = formatPersonDetails(person);
   if (!modalElement.open) {
     modalElement.showModal();
@@ -192,8 +194,10 @@ async function init() {
 
     const searchModal = new SearchModal({
       onSelect: (person) => {
-        treeApi.focusOnIndividual(person.id);
-        openPersonModal(person);
+        const focused = treeApi.focusOnIndividual(person.id);
+        if (!focused) {
+          treeApi.highlightIndividual(person.id);
+        }
       }
     });
     searchModal.mount(document.body);
@@ -215,6 +219,14 @@ async function init() {
 
     searchPanel.mount(formElements.searchPanelContainer);
     window.requestAnimationFrame(() => searchPanel.focus());
+
+    const focusRoot = () => {
+      const success = treeApi.focusOnIndividual(ROOT_PERSON_ID, { animate: false });
+      if (!success) {
+        treeApi.highlightIndividual(ROOT_PERSON_ID);
+      }
+    };
+    window.requestAnimationFrame(focusRoot);
 
     if (typeof window !== 'undefined') {
       window.herbautTree = treeApi;

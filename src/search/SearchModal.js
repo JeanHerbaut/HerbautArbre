@@ -1,3 +1,5 @@
+import { formatPersonDisplayName } from '../utils/person.js';
+
 const TRANSITION_DURATION = 200;
 
 function createResultItem(person, onSelect) {
@@ -6,7 +8,7 @@ function createResultItem(person, onSelect) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'search-modal__result';
-  button.textContent = person.name ?? person.id;
+  button.textContent = formatPersonDisplayName(person) || person.name || person.id;
   button.addEventListener('click', () => onSelect(person));
   item.appendChild(button);
   return item;

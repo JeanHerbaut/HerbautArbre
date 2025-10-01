@@ -1,4 +1,5 @@
 import * as d3 from 'd3';
+import { formatPersonDisplayName } from '../utils/person.js';
 
 const ZOOM_EXTENT = [0.35, 3];
 const FOCUS_TRANSITION_DURATION = 650;
@@ -81,7 +82,13 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     .attr('tabindex', (d) => (d.person ? 0 : null))
     .attr('role', (d) => (d.person ? 'button' : null))
     .attr('data-person-id', (d) => d.person?.id ?? null)
-    .attr('aria-label', (d) => (d.person ? `Afficher les détails de ${d.person.name ?? d.person.id}` : null));
+    .attr('aria-label', (d) => {
+      if (!d.person) {
+        return null;
+      }
+      const displayName = formatPersonDisplayName(d.person);
+      return `Afficher les détails de ${displayName || d.person.id}`;
+    });
 
   nodeElements
     .append('circle')
@@ -93,7 +100,13 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     .attr('class', 'tree-node__label')
     .attr('dy', '0.32em')
     .attr('x', 18)
-    .text((d) => d.person?.name ?? d.person?.id ?? d.person ?? d.id);
+    .text((d) => {
+      if (d.person) {
+        const label = formatPersonDisplayName(d.person);
+        return label || d.person.id || d.id;
+      }
+      return d.person?.id ?? d.person ?? d.id;
+    });
 
   labels
     .filter((d) => Boolean(d.person?.sosa) || d.generation != null)
