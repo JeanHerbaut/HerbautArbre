@@ -1,8 +1,14 @@
+import { hierarchy, tree } from 'd3';
+
 const DEFAULT_VERTICAL_GAP = 180;
 const DEFAULT_HORIZONTAL_GAP = 180;
 const HORIZONTAL_PADDING = 200;
 const VERTICAL_PADDING = 200;
 const BRANCH_COLORS = 6;
+const NAME_COLLATOR = new Intl.Collator('fr', {
+  sensitivity: 'base',
+  ignorePunctuation: true
+});
 
 function parseGeneration(rawValue) {
   if (rawValue == null) {
@@ -41,54 +47,63 @@ function collectRoots(nodes) {
   return roots;
 }
 
-function assignDepth(node, depth) {
-  node.depth = depth;
-  node.children.forEach((child) => {
-    assignDepth(child, depth + 1);
-  });
-}
-
-function firstWalk(node, nextX) {
-  if (!node.children.length) {
-    node._x = nextX.value;
-    nextX.value += 1;
-    return;
-  }
-
-  node.children.forEach((child) => {
-    firstWalk(child, nextX);
-  });
-
-  const firstChild = node.children[0];
-  const lastChild = node.children[node.children.length - 1];
-  node._x = (firstChild._x + lastChild._x) / 2;
-}
-
-function secondWalk(node, nodes, stats, gaps) {
-  const depthOffset = node.depth + 1; // Compense la racine virtuelle (-1)
-  const x = node._x * gaps.horizontal;
-  const y = depthOffset * gaps.vertical;
-
-  node.x = x;
-  node.y = y;
-
-  if (!node.isVirtual) {
-    stats.minX = Math.min(stats.minX, x);
-    stats.maxX = Math.max(stats.maxX, x);
-    stats.maxDepth = Math.max(stats.maxDepth, node.depth);
-    nodes.push(node);
-  }
-
-  node.children.forEach((child) => {
-    secondWalk(child, nodes, stats, gaps);
-  });
-}
-
 function annotateBranch(node, branchIndex) {
   node.branchIndex = branchIndex;
   node.children.forEach((child) => {
     annotateBranch(child, branchIndex);
   });
+}
+
+function compareNodes(a, b) {
+  const genA = parseGeneration(a.person?.generation);
+  const genB = parseGeneration(b.person?.generation);
+  if (genA != null && genB != null && genA !== genB) {
+    return genA - genB;
+  }
+  if (genA != null && genB == null) {
+    return -1;
+  }
+  if (genA == null && genB != null) {
+    return 1;
+  }
+  const labelA = a.person?.name ?? a.person?.id ?? a.id;
+  const labelB = b.person?.name ?? b.person?.id ?? b.id;
+  return NAME_COLLATOR.compare(labelA, labelB);
+}
+
+function selectPrimaryParent(entries) {
+  if (!entries.length) {
+    return null;
+  }
+  const maleEntry = entries.find((entry) => {
+    const gender = entry.parentNode.person?.gender;
+    if (!gender) {
+      return false;
+    }
+    const normalized = String(gender).toLowerCase();
+    return normalized === 'm' || normalized === 'male';
+  });
+  if (maleEntry) {
+    return maleEntry.parentNode;
+  }
+  const ranked = entries
+    .map((entry) => ({
+      entry,
+      generation: parseGeneration(entry.parentNode.person?.generation)
+    }))
+    .sort((a, b) => {
+      if (a.generation == null && b.generation == null) {
+        return 0;
+      }
+      if (a.generation == null) {
+        return 1;
+      }
+      if (b.generation == null) {
+        return -1;
+      }
+      return a.generation - b.generation;
+    });
+  return ranked[0]?.entry.parentNode ?? entries[0].parentNode;
 }
 
 export function buildTreeLayout(individuals = [], relationships = []) {
@@ -98,6 +113,7 @@ export function buildTreeLayout(individuals = [], relationships = []) {
   });
 
   const additionalRelationships = [];
+  const parentRelationsByChild = new Map();
 
   relationships.forEach((relation) => {
     if (!relation || !relation.source || !relation.target) {
@@ -109,13 +125,50 @@ export function buildTreeLayout(individuals = [], relationships = []) {
       return;
     }
     if (relation.type === 'parent-child') {
-      if (!sourceNode.children.includes(targetNode)) {
-        sourceNode.children.push(targetNode);
+      if (!parentRelationsByChild.has(targetNode.id)) {
+        parentRelationsByChild.set(targetNode.id, []);
       }
-      targetNode.parents.add(sourceNode);
+      parentRelationsByChild.get(targetNode.id).push({
+        relation,
+        parentNode: sourceNode
+      });
     } else {
       additionalRelationships.push(relation);
     }
+  });
+
+  const secondaryRelationships = [];
+
+  parentRelationsByChild.forEach((entries, childId) => {
+    const childNode = nodesById.get(childId);
+    if (!childNode) {
+      return;
+    }
+    const validEntries = entries.filter((entry) => Boolean(entry.parentNode));
+    if (validEntries.length === 0) {
+      return;
+    }
+    validEntries.sort((a, b) => compareNodes(a.parentNode, b.parentNode));
+    const primaryParent = selectPrimaryParent(validEntries);
+    if (primaryParent && !primaryParent.children.includes(childNode)) {
+      primaryParent.children.push(childNode);
+      childNode.parents.add(primaryParent);
+    }
+    validEntries.forEach((entry) => {
+      if (!entry.parentNode || entry.parentNode === primaryParent) {
+        return;
+      }
+      secondaryRelationships.push({
+        type: 'relationship',
+        source: entry.parentNode.id,
+        target: childId,
+        context: entry.relation.context ?? 'secondary-parent'
+      });
+    });
+  });
+
+  nodesById.forEach((node) => {
+    node.children.sort(compareNodes);
   });
 
   let roots = collectRoots(nodesById);
@@ -123,66 +176,65 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     roots = Array.from(nodesById.values());
   }
 
+  roots.sort(compareNodes);
+
   const virtualRoot = {
     id: '__root__',
     person: null,
     children: roots,
     parents: new Set(),
-    isVirtual: true,
-    depth: -1
+    isVirtual: true
   };
 
-  assignDepth(virtualRoot, -1);
-
-  // Attache les nœuds orphelins (non atteints) à la racine virtuelle
-  nodesById.forEach((node) => {
-    if (node.depth == null) {
-      virtualRoot.children.push(node);
-      node.parents.add(virtualRoot);
-      assignDepth(node, 0);
-    }
-  });
-
-  // Recalcule les profondeurs avec les nouveaux enfants potentiels
-  assignDepth(virtualRoot, -1);
-
-  const nextX = { value: 0 };
-  firstWalk(virtualRoot, nextX);
+  const hierarchyRoot = hierarchy(virtualRoot, (node) => node.children);
+  const treeLayout = tree().nodeSize([DEFAULT_HORIZONTAL_GAP, DEFAULT_VERTICAL_GAP]);
+  treeLayout(hierarchyRoot);
 
   const nodes = [];
   const stats = {
     minX: Number.POSITIVE_INFINITY,
     maxX: Number.NEGATIVE_INFINITY,
-    maxDepth: Number.NEGATIVE_INFINITY
+    minY: Number.POSITIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY
   };
 
-  secondWalk(
-    virtualRoot,
-    nodes,
-    stats,
-    {
-      horizontal: DEFAULT_HORIZONTAL_GAP,
-      vertical: DEFAULT_VERTICAL_GAP
+  hierarchyRoot.each((hierNode) => {
+    const dataNode = hierNode.data;
+    if (dataNode === virtualRoot) {
+      return;
     }
-  );
+    dataNode.depth = hierNode.depth - 1;
+    dataNode.x = hierNode.x;
+    dataNode.y = hierNode.y;
+
+    stats.minX = Math.min(stats.minX, dataNode.x);
+    stats.maxX = Math.max(stats.maxX, dataNode.x);
+    stats.minY = Math.min(stats.minY, dataNode.y);
+    stats.maxY = Math.max(stats.maxY, dataNode.y);
+
+    nodes.push(dataNode);
+  });
 
   if (!Number.isFinite(stats.minX)) {
     stats.minX = 0;
     stats.maxX = 0;
   }
-
-  if (!Number.isFinite(stats.maxDepth)) {
-    stats.maxDepth = 0;
+  if (!Number.isFinite(stats.minY)) {
+    stats.minY = 0;
+    stats.maxY = 0;
   }
 
   const offsetX = HORIZONTAL_PADDING - stats.minX;
+  const offsetY = VERTICAL_PADDING - stats.minY;
+
   nodes.forEach((node) => {
     node.x += offsetX;
+    node.y += offsetY;
   });
 
   const dimensions = {
     width: stats.maxX - stats.minX + HORIZONTAL_PADDING * 2,
-    height: (stats.maxDepth + 2) * DEFAULT_VERTICAL_GAP + VERTICAL_PADDING
+    height: stats.maxY - stats.minY + VERTICAL_PADDING * 2
   };
 
   const topLevelChildren = virtualRoot.children.filter((child) => !child.isVirtual);
@@ -195,7 +247,7 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     if (declaredGeneration != null) {
       node.generation = declaredGeneration;
     } else {
-      node.generation = Math.max(0, node.depth);
+      node.generation = Math.max(0, node.depth ?? 0);
     }
   });
 
@@ -215,11 +267,21 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     });
   });
 
-  const relationshipLinks = additionalRelationships
+  const allRelationships = additionalRelationships.concat(secondaryRelationships);
+  const relationshipLinks = allRelationships
     .map((relation) => {
       const sourceNode = nodesById.get(relation.source);
       const targetNode = nodesById.get(relation.target);
-      if (!sourceNode || !targetNode || sourceNode.isVirtual || targetNode.isVirtual) {
+      if (
+        !sourceNode ||
+        !targetNode ||
+        sourceNode.isVirtual ||
+        targetNode.isVirtual ||
+        sourceNode.x == null ||
+        sourceNode.y == null ||
+        targetNode.x == null ||
+        targetNode.y == null
+      ) {
         return null;
       }
       return {
