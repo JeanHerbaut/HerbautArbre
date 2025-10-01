@@ -1,19 +1,65 @@
 import * as d3 from 'd3';
 import { formatPersonDisplayName } from '../utils/person.js';
 
-const ZOOM_EXTENT = [0.35, 3];
+const ZOOM_EXTENT = [0.12, 36];
 const FOCUS_TRANSITION_DURATION = 650;
 const ZOOM_TRANSITION_DURATION = 320;
-const FOCUS_MIN_SCALE = 1.15;
-const FOCUS_AUTO_DIVISOR = 420;
+const FOCUS_MIN_SCALE = 2.1;
+const FOCUS_TARGET_SPAN = 260;
+const AUTO_FIT_PADDING = 0.35;
+const AUTO_FIT_MIN_SCALE = 0.9;
 
-function buildLinkPath(link) {
+function polarToCartesian(angle, radius, center) {
+  if (!center || !Number.isFinite(angle) || !Number.isFinite(radius)) {
+    return null;
+  }
+  const polarAngle = angle - Math.PI / 2;
+  return {
+    x: center.x + radius * Math.cos(polarAngle),
+    y: center.y + radius * Math.sin(polarAngle)
+  };
+}
+
+function buildLinkPath(link, center) {
   const { source, target } = link;
+  if (!source || !target) {
+    return '';
+  }
   if (link.type === 'parent-child') {
+    const path = d3.path();
+    path.moveTo(source.x, source.y);
+    if (
+      typeof source.angle === 'number' &&
+      typeof source.radius === 'number' &&
+      typeof target.angle === 'number' &&
+      typeof target.radius === 'number'
+    ) {
+      const midAngle = (source.angle + target.angle) / 2;
+      const midRadius = (source.radius + target.radius) / 2;
+      const midPoint = polarToCartesian(midAngle, midRadius, center);
+      if (midPoint) {
+        path.quadraticCurveTo(midPoint.x, midPoint.y, target.x, target.y);
+        return path.toString();
+      }
+    }
+    const midX = (source.x + target.x) / 2;
     const midY = (source.y + target.y) / 2;
-    return `M${source.x},${source.y}C${source.x},${midY} ${target.x},${midY} ${target.x},${target.y}`;
+    path.quadraticCurveTo(midX, midY, target.x, target.y);
+    return path.toString();
   }
   return `M${source.x},${source.y}L${target.x},${target.y}`;
+}
+
+function computeLabelOrientation(datum) {
+  if (!datum || typeof datum.angle !== 'number') {
+    return { anchor: 'start', offset: 18 };
+  }
+  const polarAngle = datum.angle - Math.PI / 2;
+  const isLeft = Math.cos(polarAngle) < 0;
+  return {
+    anchor: isLeft ? 'end' : 'start',
+    offset: isLeft ? -18 : 18
+  };
 }
 
 function nodeClasses(datum) {
@@ -45,7 +91,7 @@ function linkClassName(type) {
 }
 
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
-  const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById } = layout;
+  const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds } = layout;
 
   const svg = d3.select(svgElement);
   svg.selectAll('*').remove();
@@ -59,19 +105,24 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   const relationshipsGroup = rootGroup.append('g').attr('class', 'tree-links tree-links--relationships');
   const nodesGroup = rootGroup.append('g').attr('class', 'tree-nodes');
 
+  const layoutCenter = {
+    x: dimensions.width / 2,
+    y: dimensions.height / 2
+  };
+
   linksGroup
     .selectAll('path')
     .data(hierarchicalLinks)
     .join('path')
     .attr('class', (d) => linkClassName(d.type))
-    .attr('d', buildLinkPath);
+    .attr('d', (d) => buildLinkPath(d, layoutCenter));
 
   relationshipsGroup
     .selectAll('path')
     .data(relationshipLinks)
     .join('path')
     .attr('class', (d) => linkClassName(d.type))
-    .attr('d', buildLinkPath);
+    .attr('d', (d) => buildLinkPath(d, layoutCenter));
 
   const nodeElements = nodesGroup
     .selectAll('g')
@@ -99,7 +150,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     .append('text')
     .attr('class', 'tree-node__label')
     .attr('dy', '0.32em')
-    .attr('x', 18)
+    .attr('text-anchor', (d) => computeLabelOrientation(d).anchor)
+    .attr('x', (d) => computeLabelOrientation(d).offset)
     .text((d) => {
       if (d.person) {
         const label = formatPersonDisplayName(d.person);
@@ -112,7 +164,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     .filter((d) => Boolean(d.person?.sosa) || d.generation != null)
     .append('tspan')
     .attr('class', 'tree-node__subtitle')
-    .attr('x', 18)
+    .attr('x', (d) => computeLabelOrientation(d).offset)
     .attr('dy', '1.2em')
     .text((d) => {
       const fragments = [];
@@ -140,6 +192,56 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     highlightedId = personId ?? null;
   }
 
+  function getContainerSize() {
+    const rect = containerElement.getBoundingClientRect();
+    const width = Math.max(rect?.width || 0, containerElement.clientWidth || 0, containerElement.offsetWidth || 0, 1);
+    const height = Math.max(rect?.height || 0, containerElement.clientHeight || 0, containerElement.offsetHeight || 0, 1);
+    return { width, height };
+  }
+
+  function computeAutoFitTransform() {
+    const { width, height } = getContainerSize();
+    const layoutWidth = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
+      ? Math.max(bounds.maxX - bounds.minX, 1)
+      : dimensions.width;
+    const layoutHeight = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
+      ? Math.max(bounds.maxY - bounds.minY, 1)
+      : dimensions.height;
+    const paddedWidth = layoutWidth * (1 + AUTO_FIT_PADDING);
+    const paddedHeight = layoutHeight * (1 + AUTO_FIT_PADDING);
+    const ratios = [];
+    if (width > 0) {
+      ratios.push(width / paddedWidth);
+    }
+    if (height > 0) {
+      ratios.push(height / paddedHeight);
+    }
+    let scale = ratios.length > 0 ? Math.min(...ratios) : 1;
+    if (!Number.isFinite(scale) || scale <= 0) {
+      scale = 1;
+    }
+    scale = Math.max(AUTO_FIT_MIN_SCALE, scale);
+    scale = Math.max(ZOOM_EXTENT[0], Math.min(ZOOM_EXTENT[1], scale));
+    const centerX = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
+      ? (bounds.minX + bounds.maxX) / 2
+      : dimensions.width / 2;
+    const centerY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
+      ? (bounds.minY + bounds.maxY) / 2
+      : dimensions.height / 2;
+    const translateX = width / 2 - centerX * scale;
+    const translateY = height / 2 - centerY * scale;
+    return d3.zoomIdentity.translate(translateX, translateY).scale(scale);
+  }
+
+  function applyTransform(targetTransform, { animate = true, duration = ZOOM_TRANSITION_DURATION } = {}) {
+    if (!targetTransform) {
+      return;
+    }
+    svg.interrupt();
+    const zoomTarget = animate ? svg.transition().duration(duration) : svg;
+    zoomTarget.call(zoomBehavior.transform, targetTransform);
+  }
+
   function focusOnIndividual(personId, { animate = true } = {}) {
     const node = nodeById.get(personId);
     if (!node) {
@@ -147,22 +249,21 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     }
     setHighlight(personId);
     const nodeElement = nodeElementMap.get(personId);
-    const { width, height } = containerElement.getBoundingClientRect();
+    const { width, height } = getContainerSize();
     const shortestSide = Math.min(width, height);
-    const autoScale = Number.isFinite(shortestSide) && shortestSide > 0
-      ? shortestSide / FOCUS_AUTO_DIVISOR
+    const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
+      ? shortestSide / FOCUS_TARGET_SPAN
       : FOCUS_MIN_SCALE;
-    const baseScale = Math.min(
+    const baseScale = Math.max(FOCUS_MIN_SCALE, desiredScale);
+    const targetScale = Math.min(
       ZOOM_EXTENT[1],
-      Math.max(ZOOM_EXTENT[0], Math.max(autoScale, FOCUS_MIN_SCALE))
+      Math.max(baseScale, currentTransform.k || 0)
     );
-    const targetScale = Math.min(ZOOM_EXTENT[1], Math.max(baseScale, currentTransform.k || 0));
     const translateX = width / 2 - node.x * targetScale;
     const translateY = height / 2 - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
 
-    const zoomTarget = animate ? svg.transition().duration(FOCUS_TRANSITION_DURATION) : svg;
-    zoomTarget.call(zoomBehavior.transform, targetTransform);
+    applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
 
     if (typeof nodeElement?.focus === 'function') {
       nodeElement.focus({ preventScroll: true });
@@ -171,7 +272,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   }
 
   function adjustZoom(factor) {
-    const { width, height } = containerElement.getBoundingClientRect();
+    const { width, height } = getContainerSize();
     const targetScale = Math.max(
       ZOOM_EXTENT[0],
       Math.min(ZOOM_EXTENT[1], currentTransform.k * factor)
@@ -181,19 +282,18 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const translateX = width / 2 - centerX * targetScale;
     const translateY = height / 2 - centerY * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
-    svg.transition().duration(ZOOM_TRANSITION_DURATION).call(zoomBehavior.transform, targetTransform);
+    applyTransform(targetTransform);
   }
 
-  function resetView() {
-    const { width, height } = containerElement.getBoundingClientRect();
-    const scale = Math.max(
-      ZOOM_EXTENT[0],
-      Math.min(ZOOM_EXTENT[1], Math.min(width / dimensions.width, 0.85))
-    );
-    const translateX = width / 2 - (dimensions.width / 2) * scale;
-    const translateY = 80;
-    const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(scale);
-    svg.transition().duration(ZOOM_TRANSITION_DURATION).call(zoomBehavior.transform, targetTransform);
+  function resetView({ animate = true } = {}) {
+    if (highlightedId) {
+      const success = focusOnIndividual(highlightedId, { animate });
+      if (success) {
+        return;
+      }
+    }
+    const targetTransform = computeAutoFitTransform();
+    applyTransform(targetTransform, { animate });
   }
 
   function handleNodeActivate(event, datum) {
@@ -234,6 +334,18 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   svg.call(zoomBehavior);
   resetView();
 
+  const resizeObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver(() => {
+        window.requestAnimationFrame(() => {
+          resetView({ animate: false });
+        });
+      })
+    : null;
+
+  if (resizeObserver) {
+    resizeObserver.observe(containerElement);
+  }
+
   const api = {
     focusOnIndividual,
     highlightIndividual(personId) {
@@ -252,6 +364,9 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     },
     get highlightedId() {
       return highlightedId;
+    },
+    destroy() {
+      resizeObserver?.disconnect();
     }
   };
 
