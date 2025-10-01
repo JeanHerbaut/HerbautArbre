@@ -32,6 +32,7 @@ Ce guide décrit pas à pas la mise en ligne de l'application telle qu'elle est 
    - lance `npm run build` pour produire le dossier `dist/`,
    - téléverse `dist/` comme artefact GitHub Pages puis déclenche `actions/deploy-pages` pour mettre à jour le site.
 
+
 ## 4. Vérifier la publication
 
 1. Sur la page **Actions**, attendez que le job **Deploy** passe au statut **✅ Success**.
