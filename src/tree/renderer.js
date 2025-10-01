@@ -8,6 +8,19 @@ const FOCUS_MIN_SCALE = 2.1;
 const FOCUS_TARGET_SPAN = 260;
 const AUTO_FIT_PADDING = 0.35;
 const AUTO_FIT_MIN_SCALE = 0.9;
+const LABEL_MAX_LINE_LENGTH = 18;
+
+const LINK_TYPE_CLASS_MAP = new Map([
+  ['parent-child', 'parent'],
+  ['parentchild', 'parent'],
+  ['parent', 'parent'],
+  ['union', 'union'],
+  ['marriage', 'marriage'],
+  ['mariage', 'marriage'],
+  ['married', 'marriage'],
+  ['couple', 'union'],
+  ['spouse', 'union']
+]);
 
 function polarToCartesian(angle, radius, center) {
   if (!center || !Number.isFinite(angle) || !Number.isFinite(radius)) {
@@ -85,9 +98,78 @@ function nodeClasses(datum) {
 
 function linkClassName(type) {
   const normalized = String(type ?? 'relationship')
+    .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-');
-  return `tree-link tree-link--${normalized}`;
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const preferred = LINK_TYPE_CLASS_MAP.get(normalized) ?? LINK_TYPE_CLASS_MAP.get(normalized.replace(/[^a-z0-9]+/g, ''));
+  if (preferred) {
+    return `tree-link tree-link--${preferred}`;
+  }
+  const fallback = normalized.replace(/[^a-z0-9]+/g, '-') || 'relationship';
+  return `tree-link tree-link--${fallback}`;
+}
+
+function splitLabelLines(label) {
+  if (!label) {
+    return [];
+  }
+  const sanitized = label.replace(/\s+/g, ' ').trim();
+  if (!sanitized) {
+    return [];
+  }
+  if (sanitized.length <= LABEL_MAX_LINE_LENGTH) {
+    return [sanitized];
+  }
+  const tokens = sanitized.split(' ');
+  const lines = [];
+  let currentLine = '';
+
+  const pushCurrent = () => {
+    if (currentLine) {
+      lines.push(currentLine);
+      currentLine = '';
+    }
+  };
+
+  tokens.forEach((token) => {
+    if (!token) {
+      return;
+    }
+    const candidate = currentLine ? `${currentLine} ${token}` : token;
+    const forceBreak = token.startsWith('(') && currentLine;
+    if (forceBreak) {
+      pushCurrent();
+      currentLine = token;
+      return;
+    }
+    if (candidate.length > LABEL_MAX_LINE_LENGTH && currentLine) {
+      pushCurrent();
+      currentLine = token;
+      return;
+    }
+    if (!currentLine && token.length > LABEL_MAX_LINE_LENGTH) {
+      lines.push(token);
+      currentLine = '';
+      return;
+    }
+    currentLine = candidate;
+  });
+
+  pushCurrent();
+
+  if (!lines.length) {
+    lines.push(sanitized);
+  }
+
+  if (lines.length > 3) {
+    const first = lines[0];
+    const second = lines[1];
+    const remainder = lines.slice(2).join(' ');
+    return [first, second, remainder];
+  }
+
+  return lines;
 }
 
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
@@ -151,13 +233,23 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     .attr('class', 'tree-node__label')
     .attr('dy', '0.32em')
     .attr('text-anchor', (d) => computeLabelOrientation(d).anchor)
-    .attr('x', (d) => computeLabelOrientation(d).offset)
-    .text((d) => {
-      if (d.person) {
-        const label = formatPersonDisplayName(d.person);
-        return label || d.person.id || d.id;
-      }
-      return d.person?.id ?? d.person ?? d.id;
+    .each(function (d) {
+      const orientation = computeLabelOrientation(d);
+      const label = d.person
+        ? formatPersonDisplayName(d.person) || d.person.id || d.id
+        : d.person?.id ?? d.person ?? d.id;
+      const lines = splitLabelLines(label);
+      const selection = d3.select(this);
+      selection.attr('x', orientation.offset);
+      selection.text(null);
+      const effectiveLines = lines.length > 0 ? lines : [label ?? ''];
+      effectiveLines.forEach((line, index) => {
+        selection
+          .append('tspan')
+          .attr('x', orientation.offset)
+          .attr('dy', index === 0 ? 0 : '1.1em')
+          .text(line);
+      });
     });
 
   labels
@@ -250,6 +342,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     setHighlight(personId);
     const nodeElement = nodeElementMap.get(personId);
     const { width, height } = getContainerSize();
+    const scrollLeft = containerElement?.scrollLeft ?? 0;
+    const scrollTop = containerElement?.scrollTop ?? 0;
     const shortestSide = Math.min(width, height);
     const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
       ? shortestSide / FOCUS_TARGET_SPAN
@@ -257,10 +351,10 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const baseScale = Math.max(FOCUS_MIN_SCALE, desiredScale);
     const targetScale = Math.min(
       ZOOM_EXTENT[1],
-      Math.max(baseScale, currentTransform.k || 0)
+      Math.max(baseScale, Number.isFinite(currentTransform.k) ? currentTransform.k : 1)
     );
-    const translateX = width / 2 - node.x * targetScale;
-    const translateY = height / 2 - node.y * targetScale;
+    const translateX = scrollLeft + width / 2 - node.x * targetScale;
+    const translateY = scrollTop + height / 2 - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
