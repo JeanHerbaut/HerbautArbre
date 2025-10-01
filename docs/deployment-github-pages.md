@@ -30,7 +30,8 @@ Ce guide décrit pas à pas la mise en ligne de l'application telle qu'elle est 
 4. Lors de l'exécution, le workflow :
    - installe les dépendances avec `npm ci`,
    - lance `npm run build` pour produire le dossier `dist/`,
-   - publie ce dossier sur la branche `gh-pages` via `peaceiris/actions-gh-pages` en utilisant le `GITHUB_TOKEN` fourni par GitHub.
+   - téléverse `dist/` comme artefact GitHub Pages puis déclenche `actions/deploy-pages` pour mettre à jour le site.
+
 
 ## 4. Vérifier la publication
 
