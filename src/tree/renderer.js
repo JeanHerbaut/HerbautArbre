@@ -3,6 +3,8 @@ import * as d3 from 'd3';
 const ZOOM_EXTENT = [0.35, 3];
 const FOCUS_TRANSITION_DURATION = 650;
 const ZOOM_TRANSITION_DURATION = 320;
+const FOCUS_MIN_SCALE = 1.15;
+const FOCUS_AUTO_DIVISOR = 420;
 
 function buildLinkPath(link) {
   const { source, target } = link;
@@ -48,6 +50,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   svg.selectAll('*').remove();
   svg.attr('viewBox', `0 0 ${dimensions.width} ${dimensions.height}`);
   svg.attr('role', 'presentation');
+  svg.style('cursor', 'grab');
+  svg.style('touch-action', 'none');
 
   const rootGroup = svg.append('g').attr('class', 'tree-canvas__viewport');
   const linksGroup = rootGroup.append('g').attr('class', 'tree-links');
@@ -131,11 +135,15 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     setHighlight(personId);
     const nodeElement = nodeElementMap.get(personId);
     const { width, height } = containerElement.getBoundingClientRect();
-    const fallbackScale = Math.min(1.1, width / Math.max(1, dimensions.width));
-    const targetScale = Math.max(
-      ZOOM_EXTENT[0],
-      Math.min(ZOOM_EXTENT[1], currentTransform.k || fallbackScale)
+    const shortestSide = Math.min(width, height);
+    const autoScale = Number.isFinite(shortestSide) && shortestSide > 0
+      ? shortestSide / FOCUS_AUTO_DIVISOR
+      : FOCUS_MIN_SCALE;
+    const baseScale = Math.min(
+      ZOOM_EXTENT[1],
+      Math.max(ZOOM_EXTENT[0], Math.max(autoScale, FOCUS_MIN_SCALE))
     );
+    const targetScale = Math.min(ZOOM_EXTENT[1], Math.max(baseScale, currentTransform.k || 0));
     const translateX = width / 2 - node.x * targetScale;
     const translateY = height / 2 - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
@@ -194,11 +202,21 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     rootGroup.attr('transform', currentTransform);
   }
 
+  function onZoomStart() {
+    svg.style('cursor', 'grabbing');
+  }
+
+  function onZoomEnd() {
+    svg.style('cursor', 'grab');
+  }
+
   const zoomBehavior = d3
     .zoom()
     .extent([[0, 0], [dimensions.width, dimensions.height]])
     .scaleExtent(ZOOM_EXTENT)
-    .on('zoom', onZoom);
+    .on('start', onZoomStart)
+    .on('zoom', onZoom)
+    .on('end', onZoomEnd);
 
   svg.call(zoomBehavior);
   resetView();

@@ -28,6 +28,50 @@ async function fetchData() {
   return response.json();
 }
 
+function mergeAnnotationFragments(annotations) {
+  if (!Array.isArray(annotations)) {
+    return [];
+  }
+  const merged = [];
+  let buffer = '';
+  annotations.forEach((entry) => {
+    const value = typeof entry === 'string' ? entry.trim() : '';
+    if (!value) {
+      return;
+    }
+    if (value.startsWith('- ')) {
+      if (buffer) {
+        merged.push(buffer);
+        buffer = '';
+      }
+      merged.push(value);
+      return;
+    }
+    buffer = buffer ? `${buffer} ${value}` : value;
+    if (/[.!?;:]$/.test(value)) {
+      merged.push(buffer);
+      buffer = '';
+    }
+  });
+  if (buffer) {
+    merged.push(buffer);
+  }
+  return merged;
+}
+
+function normalizeIndividuals(individuals) {
+  return individuals.map((person) => {
+    const normalizedAnnotations = mergeAnnotationFragments(person.annotations);
+    if (normalizedAnnotations.length === 0) {
+      return person;
+    }
+    return {
+      ...person,
+      annotations: normalizedAnnotations
+    };
+  });
+}
+
 function renderLayout() {
   appElement.innerHTML = `
     <div class="app__layout">
@@ -121,7 +165,8 @@ function openPersonModal(person) {
 async function init() {
   try {
     const data = await fetchData();
-    const individuals = Array.isArray(data.individuals) ? data.individuals : [];
+    const rawIndividuals = Array.isArray(data.individuals) ? data.individuals : [];
+    const individuals = normalizeIndividuals(rawIndividuals);
     const relationships = Array.isArray(data.relationships) ? data.relationships : [];
     const layout = buildTreeLayout(individuals, relationships);
     const formElements = renderLayout();
@@ -155,7 +200,10 @@ async function init() {
 
     const searchPanel = new SearchPanel({
       onSearch: (criteria) => {
-        const hasCriteria = Object.values(criteria).some((value) => value && value.length > 0);
+        const hasCriteria =
+          (criteria.lastName && criteria.lastName.length > 0) ||
+          (criteria.firstName && criteria.firstName.length > 0) ||
+          (criteria.birthDate && criteria.birthDate.length > 0);
         if (!hasCriteria) {
           searchModal.close();
           return;
