@@ -1,9 +1,11 @@
-import { hierarchy, tree } from 'd3';
+import { cluster, hierarchy } from 'd3';
 
-const DEFAULT_VERTICAL_GAP = 180;
-const DEFAULT_HORIZONTAL_GAP = 180;
-const HORIZONTAL_PADDING = 200;
-const VERTICAL_PADDING = 200;
+const DEFAULT_RADIAL_GAP = 220;
+const RADIAL_PADDING = 280;
+const FAN_START_ANGLE = (-5 * Math.PI) / 6;
+const FAN_END_ANGLE = (5 * Math.PI) / 6;
+const FAN_ANGLE_RANGE = FAN_END_ANGLE - FAN_START_ANGLE;
+const NODE_BOUNDS_PADDING = 32;
 const BRANCH_COLORS = 6;
 const NAME_COLLATOR = new Intl.Collator('fr', {
   sensitivity: 'base',
@@ -187,8 +189,14 @@ export function buildTreeLayout(individuals = [], relationships = []) {
   };
 
   const hierarchyRoot = hierarchy(virtualRoot, (node) => node.children);
-  const treeLayout = tree().nodeSize([DEFAULT_HORIZONTAL_GAP, DEFAULT_VERTICAL_GAP]);
-  treeLayout(hierarchyRoot);
+  const effectiveDepth = Math.max(1, hierarchyRoot.height - 1);
+  const radialLimit = Math.max(DEFAULT_RADIAL_GAP, effectiveDepth * DEFAULT_RADIAL_GAP);
+
+  const radialCluster = cluster()
+    .size([FAN_ANGLE_RANGE, radialLimit])
+    .separation((a, b) => (a.parent === b.parent ? 1 : 1.35));
+
+  radialCluster(hierarchyRoot);
 
   const nodes = [];
   const stats = {
@@ -198,19 +206,31 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     maxY: Number.NEGATIVE_INFINITY
   };
 
+  const canvasRadius = RADIAL_PADDING + radialLimit;
+  const centerX = canvasRadius;
+  const centerY = canvasRadius;
+
   hierarchyRoot.each((hierNode) => {
     const dataNode = hierNode.data;
     if (dataNode === virtualRoot) {
       return;
     }
-    dataNode.depth = hierNode.depth - 1;
-    dataNode.x = hierNode.x;
-    dataNode.y = hierNode.y;
+    dataNode.depth = Math.max(0, hierNode.depth - 1);
+    const angle = FAN_START_ANGLE + hierNode.x;
+    const radialDistance = RADIAL_PADDING + hierNode.y;
+    const polarAngle = angle - Math.PI / 2;
+    const cartesianX = centerX + radialDistance * Math.cos(polarAngle);
+    const cartesianY = centerY + radialDistance * Math.sin(polarAngle);
 
-    stats.minX = Math.min(stats.minX, dataNode.x);
-    stats.maxX = Math.max(stats.maxX, dataNode.x);
-    stats.minY = Math.min(stats.minY, dataNode.y);
-    stats.maxY = Math.max(stats.maxY, dataNode.y);
+    dataNode.angle = angle;
+    dataNode.radius = radialDistance;
+    dataNode.x = cartesianX;
+    dataNode.y = cartesianY;
+
+    stats.minX = Math.min(stats.minX, cartesianX);
+    stats.maxX = Math.max(stats.maxX, cartesianX);
+    stats.minY = Math.min(stats.minY, cartesianY);
+    stats.maxY = Math.max(stats.maxY, cartesianY);
 
     nodes.push(dataNode);
   });
@@ -224,17 +244,16 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     stats.maxY = 0;
   }
 
-  const offsetX = HORIZONTAL_PADDING - stats.minX;
-  const offsetY = VERTICAL_PADDING - stats.minY;
-
-  nodes.forEach((node) => {
-    node.x += offsetX;
-    node.y += offsetY;
-  });
-
   const dimensions = {
-    width: stats.maxX - stats.minX + HORIZONTAL_PADDING * 2,
-    height: stats.maxY - stats.minY + VERTICAL_PADDING * 2
+    width: canvasRadius * 2,
+    height: canvasRadius * 2
+  };
+
+  const bounds = {
+    minX: stats.minX - NODE_BOUNDS_PADDING,
+    minY: stats.minY - NODE_BOUNDS_PADDING,
+    maxX: stats.maxX + NODE_BOUNDS_PADDING,
+    maxY: stats.maxY + NODE_BOUNDS_PADDING
   };
 
   const topLevelChildren = virtualRoot.children.filter((child) => !child.isVirtual);
@@ -261,8 +280,8 @@ export function buildTreeLayout(individuals = [], relationships = []) {
         type: 'parent-child',
         sourceId: node.id,
         targetId: child.id,
-        source: { x: node.x, y: node.y },
-        target: { x: child.x, y: child.y }
+        source: { x: node.x, y: node.y, angle: node.angle, radius: node.radius },
+        target: { x: child.x, y: child.y, angle: child.angle, radius: child.radius }
       });
     });
   });
@@ -289,8 +308,18 @@ export function buildTreeLayout(individuals = [], relationships = []) {
         context: relation.context ?? null,
         sourceId: sourceNode.id,
         targetId: targetNode.id,
-        source: { x: sourceNode.x, y: sourceNode.y },
-        target: { x: targetNode.x, y: targetNode.y }
+        source: {
+          x: sourceNode.x,
+          y: sourceNode.y,
+          angle: sourceNode.angle,
+          radius: sourceNode.radius
+        },
+        target: {
+          x: targetNode.x,
+          y: targetNode.y,
+          angle: targetNode.angle,
+          radius: targetNode.radius
+        }
       };
     })
     .filter(Boolean);
@@ -304,6 +333,7 @@ export function buildTreeLayout(individuals = [], relationships = []) {
     nodeById: renderableNodesMap,
     hierarchicalLinks,
     relationshipLinks,
-    dimensions
+    dimensions,
+    bounds
   };
 }
