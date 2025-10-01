@@ -2,6 +2,38 @@
 
 Jeu de données généalogiques extrait automatiquement du PDF « Famille Herbaut ».
 
+## Installation
+
+```bash
+git clone https://github.com/<votre-compte>/HerbautArbre.git
+cd HerbautArbre
+npm ci
+```
+
+## Développement local
+
+```bash
+npm run dev
+```
+
+Le serveur Vite est disponible sur [http://localhost:5173](http://localhost:5173).
+
+## Build de production
+
+```bash
+npm run build
+```
+
+La sortie optimisée est générée dans `dist/` et servie telle quelle sur GitHub Pages.
+
+## Déploiement
+
+Le workflow GitHub Actions `deploy.yml` publie automatiquement `dist/` sur la branche `gh-pages` après chaque `push` sur `main`. Le site est ensuite disponible à l'adresse suivante :
+
+```
+https://<votre-compte>.github.io/HerbautArbre/
+```
+
 ## Extraction des données
 
 ```bash
@@ -15,6 +47,13 @@ les relations `spouse`/`parent-child` correspondantes.
 
 Le schéma détaillé et la méthodologie de validation manuelle sont documentés dans
 `docs/data-schema.md`.
+
+## Contribution
+
+1. Mettre à jour les données dans `data/famille-herbaut.json` à l'aide du script d'extraction ou via une édition manuelle documentée.
+2. Vérifier que `npm run build` termine sans erreur et que l'arbre se charge correctement en local (`npm run dev`).
+3. Après déploiement sur `gh-pages`, effectuer une vérification manuelle du site publié (navigation dans l'arbre et recherche multi-critère).
+4. Ajouter ou mettre à jour une capture d'écran de l'arbre (dans `docs/` ou `public/`) dès qu'une version représentative est disponible, puis référencer l'image dans cette documentation.
 
 ## Tests manuels recommandés
 
