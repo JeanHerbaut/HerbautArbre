@@ -1,6 +1,10 @@
 import './styles/main.scss';
+import './styles/search.scss';
 import { buildTreeLayout } from './tree/layout.js';
 import { createTreeRenderer } from './tree/renderer.js';
+import { SearchPanel } from './search/SearchPanel.js';
+import { SearchModal } from './search/SearchModal.js';
+import { filterIndividuals } from './search/filter.js';
 
 const DATA_URL = '/data/famille-herbaut.json';
 
@@ -24,47 +28,18 @@ async function fetchData() {
   return response.json();
 }
 
-function renderLayout(individuals) {
-  const uniqueGenerations = Array.from(new Set(individuals.map((person) => person.generation).filter(Boolean))).sort(
-    (a, b) => Number(a) - Number(b)
-  );
-
+function renderLayout() {
   appElement.innerHTML = `
     <div class="app__layout">
-      <aside class="search-panel">
-        <h1 class="search-panel__title">Explorateur familial</h1>
-        <form class="search-panel__form" autocomplete="off">
-          <label class="search-panel__field">
-            <span class="search-panel__label">Nom</span>
-            <input type="search" name="name" class="search-panel__input" placeholder="Rechercher un nom" />
-          </label>
-          <label class="search-panel__field">
-            <span class="search-panel__label">Num\u00e9ro Sosa</span>
-            <input type="search" name="sosa" class="search-panel__input" placeholder="Ex. 1536" />
-          </label>
-          <label class="search-panel__field">
-            <span class="search-panel__label">G\u00e9n\u00e9ration</span>
-            <select name="generation" class="search-panel__select">
-              <option value="">Toutes les g\u00e9n\u00e9rations</option>
-              ${uniqueGenerations
-                .map((generation) => `<option value="${generation}">G\u00e9n\u00e9ration ${generation}</option>`)
-                .join('')}
-              <option value="inconnue">G\u00e9n\u00e9ration inconnue</option>
-            </select>
-          </label>
-        </form>
-        <div class="search-panel__results">
-          <h2 class="search-panel__subtitle">R\u00e9sultats</h2>
-          <p class="search-panel__hint">S\u00e9lectionnez une personne pour centrer l'arbre.</p>
-          <ul class="search-panel__list" aria-live="polite"></ul>
-        </div>
+      <aside class="search-panel" aria-labelledby="search-panel-title">
+        <div class="search-panel__container" id="search-panel-container"></div>
       </aside>
-      <section class="tree-view" aria-label="Arbre g\u00e9n\u00e9alogique">
+      <section class="tree-view" aria-label="Arbre généalogique">
         <header class="tree-view__toolbar">
           <div class="tree-toolbar">
-            <div class="tree-toolbar__controls" role="group" aria-label="Contr\u00f4les du zoom">
-              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arri\u00e8re">\u2212</button>
-              <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="R\u00e9initialiser la vue">R\u00e9initialiser</button>
+            <div class="tree-toolbar__controls" role="group" aria-label="Contrôles du zoom">
+              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arrière">−</button>
+              <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="Réinitialiser la vue">Réinitialiser</button>
               <button type="button" class="tree-toolbar__button" data-tree-action="zoom-in" aria-label="Zoom avant">+</button>
             </div>
             <div class="tree-legend" aria-hidden="true">
@@ -78,7 +53,7 @@ function renderLayout(individuals) {
               </div>
               <div class="tree-legend__item">
                 <span class="tree-legend__marker tree-legend__marker--focus"></span>
-                <span class="tree-legend__label">Individu s\u00e9lectionn\u00e9</span>
+                <span class="tree-legend__label">Individu sélectionné</span>
               </div>
             </div>
           </div>
@@ -91,11 +66,7 @@ function renderLayout(individuals) {
   `;
 
   return {
-    form: appElement.querySelector('.search-panel__form'),
-    nameInput: appElement.querySelector('input[name="name"]'),
-    sosaInput: appElement.querySelector('input[name="sosa"]'),
-    generationSelect: appElement.querySelector('select[name="generation"]'),
-    resultsList: appElement.querySelector('.search-panel__list'),
+    searchPanelContainer: appElement.querySelector('#search-panel-container'),
     treeCanvas: appElement.querySelector('.tree-view__canvas'),
     treeSvg: appElement.querySelector('.tree-view__svg'),
     zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
@@ -147,55 +118,13 @@ function openPersonModal(person) {
   }
 }
 
-function createSearchResult(person, onSelect) {
-  const item = document.createElement('li');
-  item.className = 'search-panel__item';
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'search-panel__result-button';
-  button.textContent = person.name ?? person.id;
-  button.addEventListener('click', () => onSelect(person));
-  item.appendChild(button);
-  return item;
-}
-
-function setupSearch(formElements, individuals, { onPersonSelected, focusOnIndividual }) {
-  const { form, nameInput, sosaInput, generationSelect, resultsList } = formElements;
-
-  function filterResults() {
-    const nameQuery = nameInput.value.trim().toLowerCase();
-    const sosaQuery = sosaInput.value.trim().toLowerCase();
-    const generationQuery = generationSelect.value;
-
-    const filtered = individuals.filter((person) => {
-      const matchesName = !nameQuery || (person.name ?? '').toLowerCase().includes(nameQuery);
-      const matchesSosa = !sosaQuery || (person.sosa ?? '').toLowerCase().includes(sosaQuery);
-      const generationValue = person.generation ?? 'inconnue';
-      const matchesGeneration = !generationQuery || generationValue === generationQuery;
-      return matchesName && matchesSosa && matchesGeneration;
-    });
-
-    resultsList.innerHTML = '';
-    filtered.slice(0, 20).forEach((person) => {
-      const item = createSearchResult(person, (selectedPerson) => {
-        focusOnIndividual(selectedPerson.id);
-        onPersonSelected(selectedPerson);
-      });
-      resultsList.appendChild(item);
-    });
-  }
-
-  form.addEventListener('input', filterResults);
-  filterResults();
-}
-
 async function init() {
   try {
     const data = await fetchData();
     const individuals = Array.isArray(data.individuals) ? data.individuals : [];
     const relationships = Array.isArray(data.relationships) ? data.relationships : [];
     const layout = buildTreeLayout(individuals, relationships);
-    const formElements = renderLayout(individuals);
+    const formElements = renderLayout();
 
     const treeApi = createTreeRenderer({
       svgElement: formElements.treeSvg,
@@ -216,10 +145,28 @@ async function init() {
       formElements.resetViewButton.addEventListener('click', () => treeApi.resetView());
     }
 
-    setupSearch(formElements, individuals, {
-      onPersonSelected: openPersonModal,
-      focusOnIndividual: (personId) => treeApi.focusOnIndividual(personId)
+    const searchModal = new SearchModal({
+      onSelect: (person) => {
+        treeApi.focusOnIndividual(person.id);
+        openPersonModal(person);
+      }
     });
+    searchModal.mount(document.body);
+
+    const searchPanel = new SearchPanel({
+      onSearch: (criteria) => {
+        const hasCriteria = Object.values(criteria).some((value) => value && value.length > 0);
+        if (!hasCriteria) {
+          searchModal.close();
+          return;
+        }
+        const results = filterIndividuals(individuals, criteria);
+        searchModal.open(results);
+      }
+    });
+
+    searchPanel.mount(formElements.searchPanelContainer);
+    window.requestAnimationFrame(() => searchPanel.focus());
 
     if (typeof window !== 'undefined') {
       window.herbautTree = treeApi;
