@@ -42,6 +42,10 @@
   gap: 0.4rem;
 }
 
+.search-panel__field--date {
+  gap: 0.5rem;
+}
+
 .search-panel__label {
   font-weight: 600;
   color: var(--color-muted);
@@ -100,6 +104,19 @@
   transform: translateY(-1px);
   background-color: rgba(44, 110, 73, 0.18);
   outline: none;
+}
+
+.search-panel__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--color-muted);
+  user-select: none;
+}
+
+.search-panel__option input[type='checkbox'] {
+  accent-color: var(--color-secondary);
 }
 
 .search-panel__errors {

@@ -1,6 +1,5 @@
 const NAME_PATTERN = /[^\p{L}\p{M}\s'\-]/gu;
-const DATE_ALLOWED_PATTERN = /[^0-9./\-\s]/g;
-const DATE_FORMAT_PATTERN = /^(\d{1,4})([./\-](\d{1,2})([./\-](\d{1,4}))?)?$/;
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function collapseWhitespace(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -13,7 +12,14 @@ function sanitizeName(value) {
 
 function sanitizeDate(value) {
   const safeValue = typeof value === 'string' ? value : '';
-  return collapseWhitespace(safeValue.replace(DATE_ALLOWED_PATTERN, ''));
+  const trimmed = safeValue.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (!ISO_DATE_PATTERN.test(trimmed)) {
+    return '';
+  }
+  return trimmed;
 }
 
 export class SearchPanel {
@@ -24,7 +30,8 @@ export class SearchPanel {
     this.errorListElement = this.rootElement.querySelector('.search-panel__errors');
     this.lastNameInput = this.rootElement.querySelector('input[name="lastName"]');
     this.firstNameInput = this.rootElement.querySelector('input[name="firstName"]');
-    this.dateInput = this.rootElement.querySelector('input[name="date"]');
+    this.birthDateInput = this.rootElement.querySelector('input[name="birthDate"]');
+    this.birthYearToggle = this.rootElement.querySelector('input[name="birthDateUseYear"]');
 
     if (this.errorListElement) {
       this.errorListElement.hidden = true;
@@ -32,6 +39,13 @@ export class SearchPanel {
 
     this.formElement.addEventListener('submit', (event) => this.#handleSubmit(event));
     this.formElement.addEventListener('reset', () => this.#handleReset());
+    if (this.birthDateInput && this.birthYearToggle) {
+      this.birthDateInput.addEventListener('input', () => {
+        if (!this.birthDateInput.value) {
+          this.birthYearToggle.checked = false;
+        }
+      });
+    }
   }
 
   mount(container) {
@@ -61,9 +75,13 @@ export class SearchPanel {
           <label class="search-panel__label" for="search-first-name">Prénom</label>
           <input id="search-first-name" class="search-panel__input" type="search" name="firstName" autocomplete="given-name" placeholder="Ex. Jeanne" />
         </div>
-        <div class="search-panel__field">
-          <label class="search-panel__label" for="search-date">Date</label>
-          <input id="search-date" class="search-panel__input" type="search" name="date" inputmode="numeric" placeholder="JJ/MM/AAAA ou AAAA" />
+        <div class="search-panel__field search-panel__field--date">
+          <label class="search-panel__label" for="search-birth-date">Date de naissance</label>
+          <input id="search-birth-date" class="search-panel__input" type="date" name="birthDate" autocomplete="bday" />
+          <label class="search-panel__option" for="search-birth-date-use-year">
+            <input id="search-birth-date-use-year" type="checkbox" name="birthDateUseYear" />
+            <span>Inclure l'année</span>
+          </label>
         </div>
         <div class="search-panel__actions">
           <button type="submit" class="search-panel__submit">Rechercher</button>
@@ -71,7 +89,7 @@ export class SearchPanel {
         </div>
         <ul class="search-panel__errors" role="alert" aria-live="assertive"></ul>
       </form>
-      <p class="search-panel__hint">Astuce : vous pouvez saisir uniquement un nom ou affiner avec plusieurs critères.</p>
+      <p class="search-panel__hint">Astuce : sélectionnez un jour et un mois, puis cochez l'option si vous souhaitez filtrer aussi par année.</p>
     `;
     return panel;
   }
@@ -79,26 +97,43 @@ export class SearchPanel {
   #handleReset() {
     this.#renderErrors([]);
     window.requestAnimationFrame(() => this.focus());
-    this.onSearch?.({ lastName: '', firstName: '', date: '' });
+    if (this.birthDateInput) {
+      this.birthDateInput.value = '';
+    }
+    if (this.birthYearToggle) {
+      this.birthYearToggle.checked = false;
+    }
+    this.onSearch?.({ lastName: '', firstName: '', birthDate: '', birthDateUseYear: false });
   }
 
   #handleSubmit(event) {
     event.preventDefault();
     const rawValues = {
-      lastName: this.lastNameInput.value,
-      firstName: this.firstNameInput.value,
-      date: this.dateInput.value
+      lastName: this.lastNameInput?.value ?? '',
+      firstName: this.firstNameInput?.value ?? '',
+      birthDate: this.birthDateInput?.value ?? '',
+      birthDateUseYear: this.birthYearToggle?.checked ?? false
     };
 
     const cleanedValues = {
       lastName: sanitizeName(rawValues.lastName),
       firstName: sanitizeName(rawValues.firstName),
-      date: sanitizeDate(rawValues.date)
+      birthDate: sanitizeDate(rawValues.birthDate),
+      birthDateUseYear: Boolean(rawValues.birthDateUseYear)
     };
 
-    this.lastNameInput.value = cleanedValues.lastName;
-    this.firstNameInput.value = cleanedValues.firstName;
-    this.dateInput.value = cleanedValues.date;
+    if (this.lastNameInput) {
+      this.lastNameInput.value = cleanedValues.lastName;
+    }
+    if (this.firstNameInput) {
+      this.firstNameInput.value = cleanedValues.firstName;
+    }
+    if (this.birthDateInput) {
+      this.birthDateInput.value = cleanedValues.birthDate;
+    }
+    if (this.birthYearToggle) {
+      this.birthYearToggle.checked = cleanedValues.birthDateUseYear;
+    }
 
     const errors = this.#validate(cleanedValues);
     if (errors.length > 0) {
@@ -112,12 +147,13 @@ export class SearchPanel {
 
   #validate(values) {
     const issues = [];
-    const hasInput = Object.values(values).some((value) => value.length > 0);
+    const hasInput =
+      values.lastName.length > 0 || values.firstName.length > 0 || values.birthDate.length > 0;
     if (!hasInput) {
       issues.push('Renseignez au moins un critère de recherche.');
     }
-    if (values.date && !DATE_FORMAT_PATTERN.test(values.date.replace(/\s+/g, ''))) {
-      issues.push('Le format de date doit correspondre à AAAA ou JJ/MM/AAAA.');
+    if (values.birthDate && !ISO_DATE_PATTERN.test(values.birthDate)) {
+      issues.push("La date de naissance doit être une valeur valide du calendrier.");
     }
     return issues;
   }
