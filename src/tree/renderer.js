@@ -174,6 +174,8 @@ function splitLabelLines(label) {
 
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
   const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds, mode } = layout;
+  const layoutMode = mode ?? 'fan';
+  const preserveVerticalSpan = layoutMode === 'hierarchical';
 
   const svg = d3.select(svgElement);
   svg.selectAll('*').remove();
@@ -280,9 +282,16 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   let highlightedId = null;
   let currentTransform = d3.zoomIdentity;
 
-  function setHighlight(personId) {
+  function setHighlight(personId, { focusNodeElement = false } = {}) {
     nodeElements.classed('tree-node--highlight', (d) => d.person?.id === personId);
     highlightedId = personId ?? null;
+    if (!focusNodeElement || !personId) {
+      return;
+    }
+    const nodeElement = nodeElementMap.get(personId);
+    if (typeof nodeElement?.focus === 'function') {
+      nodeElement.focus({ preventScroll: true });
+    }
   }
 
   function getViewportMetrics() {
@@ -324,14 +333,18 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     if (viewportWidth > 0) {
       ratios.push(viewportWidth / paddedWidth);
     }
-    if (viewportHeight > 0) {
+    if (viewportHeight > 0 && !preserveVerticalSpan) {
       ratios.push(viewportHeight / paddedHeight);
     }
     let scale = ratios.length > 0 ? Math.min(...ratios) : 1;
     if (!Number.isFinite(scale) || scale <= 0) {
       scale = 1;
     }
-    scale = Math.max(AUTO_FIT_MIN_SCALE, scale);
+    if (preserveVerticalSpan) {
+      scale = Math.max(0.45, Math.min(1.1, scale));
+    } else {
+      scale = Math.max(AUTO_FIT_MIN_SCALE, scale);
+    }
     scale = Math.max(ZOOM_EXTENT[0], Math.min(ZOOM_EXTENT[1], scale));
     const centerX = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
       ? (bounds.minX + bounds.maxX) / 2
@@ -339,8 +352,20 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const centerY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
       ? (bounds.minY + bounds.maxY) / 2
       : dimensions.height / 2;
-    const translateX = viewportWidth / 2 - centerX * scale;
-    const translateY = viewportHeight / 2 - centerY * scale;
+    let translateX = viewportWidth / 2 - centerX * scale;
+    let translateY = viewportHeight / 2 - centerY * scale;
+    if (preserveVerticalSpan && bounds) {
+      if (Number.isFinite(bounds.minY)) {
+        const marginTop = Number.isFinite(viewportHeight)
+          ? Math.min(120, Math.max(48, viewportHeight * 0.12))
+          : 72;
+        translateY = marginTop - bounds.minY * scale;
+      }
+      if (Number.isFinite(bounds.minX) && Number.isFinite(bounds.maxX)) {
+        const horizontalCenter = (bounds.minX + bounds.maxX) / 2;
+        translateX = viewportWidth / 2 - horizontalCenter * scale;
+      }
+    }
     return d3.zoomIdentity.translate(translateX, translateY).scale(scale);
   }
 
@@ -359,7 +384,6 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       return false;
     }
     setHighlight(personId);
-    const nodeElement = nodeElementMap.get(personId);
     if (containerElement) {
       if (typeof containerElement.scrollTo === 'function') {
         containerElement.scrollTo({ left: 0, top: 0 });
@@ -384,8 +408,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
 
-    if (focusNode && typeof nodeElement?.focus === 'function') {
-      nodeElement.focus({ preventScroll: true });
+    if (focusNode) {
+      setHighlight(personId, { focusNodeElement: true });
     }
     return true;
   }
@@ -469,12 +493,17 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
 
   const api = {
     focusOnIndividual,
-    highlightIndividual(personId) {
-      setHighlight(personId);
-      const nodeElement = nodeElementMap.get(personId);
-      if (typeof nodeElement?.focus === 'function') {
-        nodeElement.focus({ preventScroll: true });
+    highlightIndividual(personId, { focusView = true, animate = true, focusNode = true } = {}) {
+      if (!personId) {
+        setHighlight(null);
+        return false;
       }
+      const node = nodeById.get(personId);
+      if (node && focusView) {
+        return focusOnIndividual(personId, { animate, focusNode });
+      }
+      setHighlight(personId, { focusNodeElement: focusNode });
+      return Boolean(node);
     },
     resetView,
     zoomIn() {

@@ -9,6 +9,7 @@ import { formatPersonDisplayName } from './utils/person.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const ROOT_PERSON_ID = 'S_3072';
+const DEFAULT_FOCUS_NAME = 'Jéhovah Herbaut premier du nom';
 const FAN_LAYOUT_QUERY = '(max-width: 768px)';
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 
@@ -94,6 +95,37 @@ function deriveNameFromAnnotations(annotations) {
   return null;
 }
 
+function normalizeComparableText(value) {
+  if (!value) {
+    return '';
+  }
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findPersonIdByName(individuals, targetName) {
+  const normalizedTarget = normalizeComparableText(targetName);
+  if (!normalizedTarget) {
+    return null;
+  }
+  for (const person of individuals) {
+    if (!person) {
+      continue;
+    }
+    const candidates = [person.name, formatPersonDisplayName(person)].filter(Boolean);
+    for (const candidate of candidates) {
+      if (normalizeComparableText(candidate) === normalizedTarget) {
+        return person.id;
+      }
+    }
+  }
+  return null;
+}
+
 function normalizeIndividuals(individuals) {
   return individuals.map((person) => {
     const normalizedAnnotations = mergeAnnotationFragments(person.annotations);
@@ -125,9 +157,6 @@ function normalizeIndividuals(individuals) {
 function renderLayout() {
   appElement.innerHTML = `
     <div class="app__layout">
-      <aside class="search-panel" aria-labelledby="search-panel-title">
-        <div class="search-panel__container" id="search-panel-container"></div>
-      </aside>
       <section class="tree-view" aria-label="Arbre généalogique">
         <header class="tree-view__toolbar">
           <div class="tree-toolbar">
@@ -156,6 +185,9 @@ function renderLayout() {
           <svg class="tree-view__svg" role="presentation"></svg>
         </div>
       </section>
+      <aside class="search-panel" aria-labelledby="search-panel-title">
+        <div class="search-panel__container" id="search-panel-container"></div>
+      </aside>
     </div>
   `;
 
@@ -222,10 +254,12 @@ async function init() {
     let treeApi = null;
     let currentLayoutMode = 'fan';
     let layoutMediaQuery = null;
+    const defaultFocusId = findPersonIdByName(individuals, DEFAULT_FOCUS_NAME) ?? ROOT_PERSON_ID;
+    let preferredFocusId = defaultFocusId;
 
     const renderTree = (mode, { animateFocus = false } = {}) => {
       const layout = buildTreeLayout(individuals, relationships, { mode });
-      const previousHighlight = treeApi?.highlightedId ?? ROOT_PERSON_ID;
+      const previousHighlight = treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
       treeApi?.destroy();
       treeApi = createTreeRenderer({
         svgElement: formElements.treeSvg,
@@ -235,11 +269,12 @@ async function init() {
           openPersonModal(person);
         }
       });
-      const targetId = previousHighlight || ROOT_PERSON_ID;
+      const targetId = previousHighlight || defaultFocusId || ROOT_PERSON_ID;
       const focused = treeApi.focusOnIndividual(targetId, { animate: animateFocus });
       if (!focused) {
-        treeApi.highlightIndividual(targetId);
+        treeApi.highlightIndividual(targetId, { focusView: false });
       }
+      preferredFocusId = treeApi.highlightedId ?? targetId ?? preferredFocusId;
       if (typeof window !== 'undefined') {
         window.herbautTree = treeApi;
       }
@@ -261,6 +296,7 @@ async function init() {
         if (!focused) {
           treeApi?.highlightIndividual(person.id);
         }
+        preferredFocusId = treeApi?.highlightedId ?? person.id ?? preferredFocusId;
       }
     });
     searchModal.mount(document.body);
@@ -276,6 +312,16 @@ async function init() {
           return;
         }
         const results = filterIndividuals(individuals, criteria);
+        if (results.length === 1) {
+          const [singleResult] = results;
+          const focused = treeApi?.focusOnIndividual(singleResult.id);
+          if (!focused) {
+            treeApi?.highlightIndividual(singleResult.id);
+          }
+          preferredFocusId = treeApi?.highlightedId ?? singleResult.id ?? preferredFocusId;
+          searchModal.close();
+          return;
+        }
         searchModal.open(results);
       }
     });
