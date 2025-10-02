@@ -270,11 +270,21 @@ async function init() {
         }
       });
       const targetId = previousHighlight || defaultFocusId || ROOT_PERSON_ID;
-      const focused = treeApi.focusOnIndividual(targetId, { animate: animateFocus });
-      if (!focused) {
-        treeApi.highlightIndividual(targetId, { focusView: false });
+      const applyInitialFocus = ({ animate } = {}) => {
+        const focused = treeApi.focusOnIndividual(targetId, { animate });
+        if (!focused) {
+          treeApi.highlightIndividual(targetId, { focusView: false });
+        }
+        preferredFocusId = treeApi.highlightedId ?? targetId ?? preferredFocusId;
+      };
+
+      applyInitialFocus({ animate: animateFocus });
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          applyInitialFocus({ animate: false });
+        });
       }
-      preferredFocusId = treeApi.highlightedId ?? targetId ?? preferredFocusId;
       if (typeof window !== 'undefined') {
         window.herbautTree = treeApi;
       }
