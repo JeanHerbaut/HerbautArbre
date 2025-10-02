@@ -133,6 +133,17 @@
   display: block;
 }
 
+@media (min-width: 1024px) {
+  .tree-view__canvas {
+    height: 80vh;
+    min-height: 80vh;
+  }
+
+  .tree-view__svg {
+    min-height: 100%;
+  }
+}
+
 .tree-canvas__viewport {
   transform-origin: center;
 }
