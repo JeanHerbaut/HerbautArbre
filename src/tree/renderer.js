@@ -335,7 +335,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     zoomTarget.call(zoomBehavior.transform, targetTransform);
   }
 
-  function focusOnIndividual(personId, { animate = true } = {}) {
+  function focusOnIndividual(personId, { animate = true, focusNode = true } = {}) {
     const node = nodeById.get(personId);
     if (!node) {
       return false;
@@ -366,7 +366,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
 
-    if (typeof nodeElement?.focus === 'function') {
+    if (focusNode && typeof nodeElement?.focus === 'function') {
       nodeElement.focus({ preventScroll: true });
     }
     return true;
@@ -386,9 +386,12 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     applyTransform(targetTransform);
   }
 
-  function resetView({ animate = true } = {}) {
+  function resetView({ animate = true, preserveFocus = false } = {}) {
     if (highlightedId) {
-      const success = focusOnIndividual(highlightedId, { animate });
+      const success = focusOnIndividual(highlightedId, {
+        animate,
+        focusNode: !preserveFocus
+      });
       if (success) {
         return;
       }
@@ -438,7 +441,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   const resizeObserver = typeof ResizeObserver === 'function'
     ? new ResizeObserver(() => {
         window.requestAnimationFrame(() => {
-          resetView({ animate: false });
+          resetView({ animate: false, preserveFocus: true });
         });
       })
     : null;
