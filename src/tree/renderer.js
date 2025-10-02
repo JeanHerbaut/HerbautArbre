@@ -298,19 +298,19 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const containerRect = containerElement?.getBoundingClientRect?.() ?? null;
     const svgRect = svg.node()?.getBoundingClientRect?.() ?? null;
     const candidateWidths = [
-      containerRect?.width,
       containerElement?.clientWidth,
+      containerRect?.width,
       containerElement?.offsetWidth,
       svgRect?.width
     ].filter((value) => Number.isFinite(value) && value > 0);
     const candidateHeights = [
-      containerRect?.height,
       containerElement?.clientHeight,
+      containerRect?.height,
       containerElement?.offsetHeight,
       svgRect?.height
     ].filter((value) => Number.isFinite(value) && value > 0);
-    const width = candidateWidths.length > 0 ? Math.max(...candidateWidths) : 1;
-    const height = candidateHeights.length > 0 ? Math.max(...candidateHeights) : 1;
+    const width = candidateWidths.length > 0 ? Math.min(...candidateWidths) : 1;
+    const height = candidateHeights.length > 0 ? Math.min(...candidateHeights) : 1;
     const scaleX = width / (dimensions.width || 1);
     const scaleY = height / (dimensions.height || 1);
     const effectiveScale = Math.max(Math.min(scaleX, scaleY), Number.EPSILON);
