@@ -296,7 +296,21 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
 
   function getViewportMetrics() {
     const containerRect = containerElement?.getBoundingClientRect?.() ?? null;
-    const svgRect = svg.node()?.getBoundingClientRect?.() ?? null;
+    const svgElementNode = svg.node();
+    const svgRect = svgElementNode?.getBoundingClientRect?.() ?? null;
+    const viewBoxBase = svgElementNode?.viewBox?.baseVal ?? null;
+    const viewBoxWidth = Number.isFinite(viewBoxBase?.width) && viewBoxBase.width > 0
+      ? viewBoxBase.width
+      : dimensions.width;
+    const viewBoxHeight = Number.isFinite(viewBoxBase?.height) && viewBoxBase.height > 0
+      ? viewBoxBase.height
+      : dimensions.height;
+    const viewBoxX = Number.isFinite(viewBoxBase?.x) ? viewBoxBase.x : 0;
+    const viewBoxY = Number.isFinite(viewBoxBase?.y) ? viewBoxBase.y : 0;
+    const viewBoxCenter = {
+      x: viewBoxX + viewBoxWidth / 2,
+      y: viewBoxY + viewBoxHeight / 2
+    };
     const candidateWidths = [
       containerElement?.clientWidth,
       containerRect?.width,
@@ -316,11 +330,24 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const effectiveScale = Math.max(Math.min(scaleX, scaleY), Number.EPSILON);
     const viewportWidth = width / effectiveScale;
     const viewportHeight = height / effectiveScale;
-    return { width, height, scaleX, scaleY, scale: effectiveScale, viewportWidth, viewportHeight };
+    return {
+      width,
+      height,
+      scaleX,
+      scaleY,
+      scale: effectiveScale,
+      viewportWidth,
+      viewportHeight,
+      viewBoxWidth,
+      viewBoxHeight,
+      viewBoxX,
+      viewBoxY,
+      viewBoxCenter
+    };
   }
 
   function computeAutoFitTransform() {
-    const { viewportWidth, viewportHeight } = getViewportMetrics();
+    const { viewportWidth, viewportHeight, viewBoxWidth, viewBoxHeight, viewBoxCenter } = getViewportMetrics();
     const layoutWidth = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
       ? Math.max(bounds.maxX - bounds.minX, 1)
       : dimensions.width;
@@ -352,18 +379,18 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const centerY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
       ? (bounds.minY + bounds.maxY) / 2
       : dimensions.height / 2;
-    let translateX = viewportWidth / 2 - centerX * scale;
-    let translateY = viewportHeight / 2 - centerY * scale;
+    let translateX = viewBoxCenter.x - centerX * scale;
+    let translateY = viewBoxCenter.y - centerY * scale;
     if (preserveVerticalSpan && bounds) {
       if (Number.isFinite(bounds.minY)) {
-        const marginTop = Number.isFinite(viewportHeight)
-          ? Math.min(120, Math.max(48, viewportHeight * 0.12))
+        const marginTop = Number.isFinite(viewBoxHeight)
+          ? Math.min(120, Math.max(48, viewBoxHeight * 0.12))
           : 72;
         translateY = marginTop - bounds.minY * scale;
       }
       if (Number.isFinite(bounds.minX) && Number.isFinite(bounds.maxX)) {
         const horizontalCenter = (bounds.minX + bounds.maxX) / 2;
-        translateX = viewportWidth / 2 - horizontalCenter * scale;
+        translateX = viewBoxCenter.x - horizontalCenter * scale;
       }
     }
     return d3.zoomIdentity.translate(translateX, translateY).scale(scale);
@@ -392,7 +419,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
         containerElement.scrollTop = 0;
       }
     }
-    const { viewportWidth, viewportHeight } = getViewportMetrics();
+    const { viewportWidth, viewportHeight, viewBoxCenter } = getViewportMetrics();
     const shortestSide = Math.min(viewportWidth, viewportHeight);
     const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
       ? shortestSide / FOCUS_TARGET_SPAN
@@ -402,8 +429,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       ZOOM_EXTENT[1],
       Math.max(baseScale, Number.isFinite(currentTransform.k) ? currentTransform.k : 1)
     );
-    const translateX = viewportWidth / 2 - node.x * targetScale;
-    const translateY = viewportHeight / 2 - node.y * targetScale;
+    const translateX = viewBoxCenter.x - node.x * targetScale;
+    const translateY = viewBoxCenter.y - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
@@ -415,14 +442,14 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   }
 
   function adjustZoom(factor) {
-    const { viewportWidth, viewportHeight } = getViewportMetrics();
+    const { viewportWidth, viewportHeight, viewBoxCenter } = getViewportMetrics();
     const targetScale = Math.max(
       ZOOM_EXTENT[0],
       Math.min(ZOOM_EXTENT[1], currentTransform.k * factor)
     );
-    const center = currentTransform.invert([viewportWidth / 2, viewportHeight / 2]);
-    const translateX = viewportWidth / 2 - center[0] * targetScale;
-    const translateY = viewportHeight / 2 - center[1] * targetScale;
+    const center = currentTransform.invert([viewBoxCenter.x, viewBoxCenter.y]);
+    const translateX = viewBoxCenter.x - center[0] * targetScale;
+    const translateY = viewBoxCenter.y - center[1] * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
     applyTransform(targetTransform);
   }
