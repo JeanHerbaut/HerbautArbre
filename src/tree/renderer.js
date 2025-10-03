@@ -331,8 +331,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       ? Math.max(0, (svgRect.height - viewBoxHeight * renderScale) / 2) / renderScale
       : 0;
     const viewCenter = {
-      x: viewBoxX + offsetX + viewBoxWidth / 2,
-      y: viewBoxY + offsetY + viewBoxHeight / 2
+      x: viewBoxX + viewBoxWidth / 2,
+      y: viewBoxY + viewBoxHeight / 2
     };
     const candidateWidths = [
       containerElement?.clientWidth,
