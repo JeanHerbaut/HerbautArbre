@@ -9,7 +9,7 @@ import { formatPersonDisplayName } from './utils/person.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const ROOT_PERSON_ID = 'S_3072';
-const DEFAULT_FOCUS_NAME = 'Jéhovah Herbaut premier du nom';
+const DEFAULT_FOCUS_NAME = 'Jehan HERBAUT';
 const VERTICAL_TREE_QUERY = '(max-width: 768px)';
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 
