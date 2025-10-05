@@ -10,7 +10,7 @@ import { formatPersonDisplayName } from './utils/person.js';
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const ROOT_PERSON_ID = 'S_3072';
 const DEFAULT_FOCUS_NAME = 'Jéhovah Herbaut premier du nom';
-const FAN_LAYOUT_QUERY = '(max-width: 768px)';
+const VERTICAL_TREE_QUERY = '(max-width: 768px)';
 const COARSE_POINTER_QUERY = '(pointer: coarse)';
 
 const appElement = document.querySelector('#app');
@@ -252,13 +252,27 @@ async function init() {
     const relationships = Array.isArray(data.relationships) ? data.relationships : [];
     const formElements = renderLayout();
     let treeApi = null;
-    let currentLayoutMode = 'fan';
+    let currentLayoutMode = 'hierarchical';
+    let currentLayoutOrientation = 'horizontal';
     let layoutMediaQuery = null;
     const defaultFocusId = findPersonIdByName(individuals, DEFAULT_FOCUS_NAME) ?? ROOT_PERSON_ID;
     let preferredFocusId = defaultFocusId;
 
-    const renderTree = (mode, { animateFocus = false } = {}) => {
-      const layout = buildTreeLayout(individuals, relationships, { mode });
+    const renderTree = (modeOrOptions = {}, { animateFocus = false } = {}) => {
+      const options =
+        typeof modeOrOptions === 'string' ? { mode: modeOrOptions } : modeOrOptions ?? {};
+      const {
+        mode = currentLayoutMode,
+        orientation = currentLayoutOrientation
+      } = options;
+      currentLayoutMode = mode;
+      const normalizedOrientation =
+        orientation ?? currentLayoutOrientation ?? 'horizontal';
+      currentLayoutOrientation = normalizedOrientation;
+      const layout = buildTreeLayout(individuals, relationships, {
+        mode: currentLayoutMode,
+        orientation: currentLayoutOrientation
+      });
       const previousHighlight = treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
       treeApi?.destroy();
       treeApi = createTreeRenderer({
@@ -344,15 +358,23 @@ async function init() {
     }
 
     if (typeof window !== 'undefined') {
-      layoutMediaQuery = window.matchMedia(FAN_LAYOUT_QUERY);
-      currentLayoutMode = layoutMediaQuery.matches ? 'fan' : 'hierarchical';
+      layoutMediaQuery = window.matchMedia(VERTICAL_TREE_QUERY);
+      if (layoutMediaQuery.matches) {
+        currentLayoutMode = 'hierarchical';
+        currentLayoutOrientation = 'vertical';
+      } else {
+        currentLayoutMode = 'hierarchical';
+        currentLayoutOrientation = 'horizontal';
+      }
       const handleLayoutChange = () => {
-        const desiredMode = layoutMediaQuery.matches ? 'fan' : 'hierarchical';
-        if (desiredMode === currentLayoutMode) {
+        const desiredMode = 'hierarchical';
+        const desiredOrientation = layoutMediaQuery.matches ? 'vertical' : 'horizontal';
+        if (desiredMode === currentLayoutMode && desiredOrientation === currentLayoutOrientation) {
           return;
         }
         currentLayoutMode = desiredMode;
-        renderTree(currentLayoutMode, { animateFocus: false });
+        currentLayoutOrientation = desiredOrientation;
+        renderTree({ mode: currentLayoutMode, orientation: currentLayoutOrientation }, { animateFocus: false });
       };
       if (typeof layoutMediaQuery.addEventListener === 'function') {
         layoutMediaQuery.addEventListener('change', handleLayoutChange);
@@ -361,7 +383,7 @@ async function init() {
       }
     }
 
-    renderTree(currentLayoutMode, { animateFocus: false });
+    renderTree({ mode: currentLayoutMode, orientation: currentLayoutOrientation }, { animateFocus: false });
   } catch (error) {
     appElement.innerHTML = `
       <div class="app__error">

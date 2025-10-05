@@ -378,16 +378,21 @@ function buildFanLayout(graph) {
     relationshipLinks,
     dimensions,
     bounds,
-    mode: 'fan'
+    mode: 'fan',
+    orientation: 'radial'
   };
 }
 
-function buildHierarchicalLayout(graph) {
+function buildHierarchicalLayout(graph, options = {}) {
   const { nodesById, virtualRoot, additionalRelationships, secondaryRelationships } = graph;
+  const orientationOption = options?.orientation === 'vertical' ? 'vertical' : 'horizontal';
+  const isVertical = orientationOption === 'vertical';
+  const breadthGap = isVertical ? CARTESIAN_HORIZONTAL_GAP : CARTESIAN_VERTICAL_GAP;
+  const depthGap = isVertical ? CARTESIAN_VERTICAL_GAP : CARTESIAN_HORIZONTAL_GAP;
 
   const hierarchyRoot = hierarchy(virtualRoot, (node) => node.children);
   const cartesianTree = tree()
-    .nodeSize([CARTESIAN_VERTICAL_GAP, CARTESIAN_HORIZONTAL_GAP])
+    .nodeSize([breadthGap, depthGap])
     .separation((a, b) => (a.parent === b.parent ? 1 : 1.25));
 
   cartesianTree(hierarchyRoot);
@@ -406,8 +411,8 @@ function buildHierarchicalLayout(graph) {
       return;
     }
     dataNode.depth = Math.max(0, hierNode.depth - 1);
-    const cartesianX = hierNode.y;
-    const cartesianY = hierNode.x;
+    const cartesianX = isVertical ? hierNode.x : hierNode.y;
+    const cartesianY = isVertical ? hierNode.y : hierNode.x;
 
     dataNode.angle = null;
     dataNode.radius = null;
@@ -478,15 +483,16 @@ function buildHierarchicalLayout(graph) {
     relationshipLinks,
     dimensions,
     bounds,
-    mode: 'hierarchical'
+    mode: 'hierarchical',
+    orientation: orientationOption
   };
 }
 
 export function buildTreeLayout(individuals = [], relationships = [], options = {}) {
-  const { mode = 'fan' } = options ?? {};
+  const { mode = 'fan', orientation = 'horizontal' } = options ?? {};
   const graph = createGraph(individuals, relationships);
   if (mode === 'hierarchical') {
-    return buildHierarchicalLayout(graph);
+    return buildHierarchicalLayout(graph, { orientation });
   }
   return buildFanLayout(graph);
 }

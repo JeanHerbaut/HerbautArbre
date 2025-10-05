@@ -175,7 +175,8 @@ function splitLabelLines(label) {
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
   const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds, mode } = layout;
   const layoutMode = mode ?? 'fan';
-  const preserveVerticalSpan = layoutMode === 'hierarchical';
+  const layoutOrientation = layout.orientation ?? (layoutMode === 'fan' ? 'radial' : 'horizontal');
+  const preserveVerticalSpan = layoutMode === 'hierarchical' && layoutOrientation !== 'vertical';
 
   const svg = d3.select(svgElement);
   svg.selectAll('*').remove();
@@ -184,6 +185,19 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   svg.style('cursor', 'grab');
   svg.style('touch-action', 'none');
   svg.attr('data-tree-layout', mode ?? 'fan');
+  if (layoutOrientation) {
+    svg.attr('data-tree-orientation', layoutOrientation);
+  } else {
+    svg.attr('data-tree-orientation', null);
+  }
+
+  if (containerElement) {
+    if (layoutOrientation) {
+      containerElement.dataset.treeOrientation = layoutOrientation;
+    } else {
+      delete containerElement.dataset.treeOrientation;
+    }
+  }
 
   const rootGroup = svg.append('g').attr('class', 'tree-canvas__viewport');
   const linksGroup = rootGroup.append('g').attr('class', 'tree-links');
