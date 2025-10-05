@@ -20,6 +20,7 @@
   flex-direction: column;
   gap: 1rem;
   width: 100%;
+  align-items: center;
 }
 
 .tree-view__toolbar {
@@ -113,43 +114,34 @@
 }
 
 .tree-view__canvas {
-  flex: 1;
+  flex: 0 0 auto;
+  width: min(100%, 1080px);
+  height: clamp(320px, 65vh, 720px);
+  max-height: 720px;
+  aspect-ratio: 3 / 2;
+  margin: 0 auto;
   overflow: auto;
   border-radius: 0.75rem;
   background: radial-gradient(circle at top, rgba(240, 200, 8, 0.06), rgba(44, 110, 73, 0.06));
   padding: 1rem;
   outline: none;
-  min-height: clamp(260px, 42vh, 440px);
-}
-
-.tree-view__canvas[data-tree-orientation='vertical'] {
-  height: min(62vh, 400px);
-  max-height: 420px;
 }
 
 .tree-view__canvas:focus-visible {
   box-shadow: 0 0 0 3px rgba(44, 110, 73, 0.35);
 }
 
+
 .tree-view__svg {
   width: 100%;
   height: 100%;
-  min-height: clamp(260px, 42vh, 440px);
   display: block;
-}
-
-.tree-view__svg[data-tree-orientation='vertical'] {
-  min-height: 100%;
+  max-width: 1080px;
 }
 
 @media (min-width: 1024px) {
   .tree-view__canvas {
-    height: 80vh;
-    min-height: 80vh;
-  }
-
-  .tree-view__svg {
-    min-height: 100%;
+    height: clamp(520px, 65vh, 720px);
   }
 }
 
