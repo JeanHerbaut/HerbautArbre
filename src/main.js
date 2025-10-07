@@ -2,6 +2,7 @@ import './styles/main.scss';
 import './styles/search.scss';
 import { buildTreeLayout } from './tree/layout.js';
 import { createTreeRenderer } from './tree/renderer.js';
+import { AddPersonModal } from './tree/AddPersonModal.js';
 import { SearchPanel } from './search/SearchPanel.js';
 import { SearchModal } from './search/SearchModal.js';
 import { filterIndividuals } from './search/filter.js';
@@ -154,6 +155,46 @@ function normalizeIndividuals(individuals) {
   });
 }
 
+let generatedPersonCounter = 0;
+
+function generateUniquePersonId(individuals = []) {
+  const existingIds = new Set(individuals.map((person) => person?.id).filter(Boolean));
+  let candidate = '';
+  do {
+    generatedPersonCounter += 1;
+    candidate = `AP_${generatedPersonCounter.toString(36).toUpperCase()}`;
+  } while (existingIds.has(candidate));
+  return candidate;
+}
+
+function createBirthInfo({ birthDate, birthPlace }) {
+  if (!birthDate && !birthPlace) {
+    return null;
+  }
+  return {
+    date: birthDate || null,
+    place: birthPlace || null
+  };
+}
+
+function determineParentRoleFromGender(person) {
+  const gender = person?.gender ? String(person.gender).toLowerCase() : '';
+  if (gender.startsWith('f')) {
+    return 'mother';
+  }
+  if (gender.startsWith('m')) {
+    return 'father';
+  }
+  return null;
+}
+
+function buildPersonName({ firstName, lastName }) {
+  const parts = [firstName, lastName]
+    .map((value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''))
+    .filter(Boolean);
+  return parts.join(' ');
+}
+
 function renderLayout() {
   appElement.innerHTML = `
     <div class="app__layout">
@@ -164,6 +205,9 @@ function renderLayout() {
               <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arrière">−</button>
               <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="Réinitialiser la vue">Réinitialiser</button>
               <button type="button" class="tree-toolbar__button" data-tree-action="zoom-in" aria-label="Zoom avant">+</button>
+            </div>
+            <div class="tree-toolbar__actions" role="group" aria-label="Gestion de l'arbre">
+              <button type="button" class="tree-toolbar__button tree-toolbar__button--primary" data-tree-action="add-person">Ajouter</button>
             </div>
             <div class="tree-legend" aria-hidden="true">
               <div class="tree-legend__item">
@@ -197,7 +241,8 @@ function renderLayout() {
     treeSvg: appElement.querySelector('.tree-view__svg'),
     zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
     zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
-    resetViewButton: appElement.querySelector('[data-tree-action="reset"]')
+    resetViewButton: appElement.querySelector('[data-tree-action="reset"]'),
+    addPersonButton: appElement.querySelector('[data-tree-action="add-person"]')
   };
 }
 
@@ -248,8 +293,8 @@ async function init() {
   try {
     const data = await fetchData();
     const rawIndividuals = Array.isArray(data.individuals) ? data.individuals : [];
-    const individuals = normalizeIndividuals(rawIndividuals);
-    const relationships = Array.isArray(data.relationships) ? data.relationships : [];
+    let individuals = normalizeIndividuals(rawIndividuals);
+    let relationships = Array.isArray(data.relationships) ? data.relationships : [];
     const formElements = renderLayout();
     let treeApi = null;
     let currentLayoutMode = 'hierarchical';
@@ -263,7 +308,8 @@ async function init() {
         typeof modeOrOptions === 'string' ? { mode: modeOrOptions } : modeOrOptions ?? {};
       const {
         mode = currentLayoutMode,
-        orientation = currentLayoutOrientation
+        orientation = currentLayoutOrientation,
+        focusId = null
       } = options;
       currentLayoutMode = mode;
       const normalizedOrientation =
@@ -273,7 +319,7 @@ async function init() {
         mode: currentLayoutMode,
         orientation: currentLayoutOrientation
       });
-      const previousHighlight = treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
+      const previousHighlight = focusId ?? treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
       treeApi?.destroy();
       treeApi = createTreeRenderer({
         svgElement: formElements.treeSvg,
@@ -312,6 +358,76 @@ async function init() {
     }
     if (formElements.resetViewButton) {
       formElements.resetViewButton.addEventListener('click', () => treeApi?.resetView());
+    }
+
+    const addPersonModal = new AddPersonModal({
+      getIndividuals: () => individuals,
+      onSubmit: (values) => {
+        const parent = individuals.find((person) => person.id === values.parentId);
+        if (!parent) {
+          return { success: false, error: 'Le parent sélectionné est introuvable.' };
+        }
+        const newId = generateUniquePersonId(individuals);
+        const personName = buildPersonName({ firstName: values.firstName, lastName: values.lastName }) || newId;
+        const parentDisplayName = formatPersonDisplayName(parent) || parent.name || parent.id;
+        const parentsInfo =
+          values.parentRole === 'mother'
+            ? { mother: parentDisplayName }
+            : { father: parentDisplayName };
+        const generation = parent.generation ? Number.parseInt(parent.generation, 10) : null;
+        const newPerson = {
+          id: newId,
+          name: personName,
+          gender: values.gender || null,
+          generation: Number.isInteger(generation) ? String(generation + 1) : null,
+          sosa: null,
+          birth: createBirthInfo({ birthDate: values.birthDate, birthPlace: values.birthPlace }),
+          death: null,
+          parents: parentsInfo,
+          spouses: null,
+          children: null,
+          annotations: []
+        };
+        const updatedIndividuals = individuals.map((person) => {
+          if (person.id !== parent.id) {
+            return person;
+          }
+          const existingChildren = Array.isArray(person.children) ? [...person.children] : [];
+          if (!existingChildren.includes(newPerson.id)) {
+            existingChildren.push(newPerson.id);
+          }
+          return {
+            ...person,
+            children: existingChildren
+          };
+        });
+        individuals = [...updatedIndividuals, newPerson];
+        relationships = [
+          ...relationships,
+          {
+            type: 'parent-child',
+            source: parent.id,
+            target: newPerson.id,
+            context: 'ajout manuel'
+          }
+        ];
+        preferredFocusId = newPerson.id;
+        renderTree(
+          { mode: currentLayoutMode, orientation: currentLayoutOrientation, focusId: newPerson.id },
+          { animateFocus: true }
+        );
+        return { success: true, created: newPerson };
+      }
+    });
+    addPersonModal.mount(document.body);
+
+    if (formElements.addPersonButton) {
+      formElements.addPersonButton.addEventListener('click', () => {
+        const highlightedId = treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
+        const highlightedPerson = individuals.find((person) => person.id === highlightedId);
+        const suggestedRole = determineParentRoleFromGender(highlightedPerson);
+        addPersonModal.open({ parentId: highlightedPerson?.id ?? '', parentRole: suggestedRole });
+      });
     }
 
     const searchModal = new SearchModal({
