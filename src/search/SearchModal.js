@@ -2,13 +2,47 @@ import { formatPersonDisplayName } from '../utils/person.js';
 
 const TRANSITION_DURATION = 200;
 
+function getSortableLabel(person) {
+  const displayName = formatPersonDisplayName(person) || person?.name || person?.id || '';
+  return displayName
+    .toString()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+}
+
+function sortResults(results) {
+  return [...results].sort((a, b) => {
+    const labelA = getSortableLabel(a);
+    const labelB = getSortableLabel(b);
+    if (labelA && labelB) {
+      return labelA.localeCompare(labelB, 'fr', { sensitivity: 'base' });
+    }
+    if (labelA) {
+      return -1;
+    }
+    if (labelB) {
+      return 1;
+    }
+    return 0;
+  });
+}
+
 function createResultItem(person, onSelect) {
   const item = document.createElement('li');
   item.className = 'search-modal__item';
+  item.setAttribute('role', 'none');
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'search-modal__result';
-  button.textContent = formatPersonDisplayName(person) || person.name || person.id;
+  const label = formatPersonDisplayName(person) || person.name || person.id;
+  button.textContent = label;
+  if (person?.id) {
+    button.dataset.personId = person.id;
+  }
+  if (label) {
+    button.setAttribute('aria-label', label);
+  }
   button.addEventListener('click', () => onSelect(person));
   item.appendChild(button);
   return item;
@@ -21,6 +55,7 @@ export class SearchModal {
     this.root = this.#createStructure();
     this.dialog = this.root.querySelector('.search-modal__dialog');
     this.list = this.root.querySelector('.search-modal__list');
+    this.body = this.root.querySelector('.search-modal__body');
     this.summary = this.root.querySelector('.search-modal__summary');
     this.closeButton = this.root.querySelector('.search-modal__close');
 
@@ -83,7 +118,7 @@ export class SearchModal {
         </header>
         <div class="search-modal__body">
           <p class="search-modal__summary" aria-live="polite"></p>
-          <ul class="search-modal__list"></ul>
+          <ul class="search-modal__list" role="listbox" aria-label="Liste des individus correspondants"></ul>
         </div>
       </div>
     `;
@@ -91,8 +126,12 @@ export class SearchModal {
   }
 
   #populate(results) {
+    if (this.body) {
+      this.body.scrollTop = 0;
+    }
     this.list.innerHTML = '';
-    if (results.length === 0) {
+    const sortedResults = sortResults(results);
+    if (sortedResults.length === 0) {
       this.summary.textContent = 'Aucun individu ne correspond aux critères renseignés.';
       const emptyItem = document.createElement('li');
       emptyItem.className = 'search-modal__empty';
@@ -101,9 +140,13 @@ export class SearchModal {
       return;
     }
 
-    this.summary.textContent = `${results.length} résultat${results.length > 1 ? 's' : ''} trouvé${results.length > 1 ? 's' : ''}.`;
+    const baseMessage = `${sortedResults.length} résultat${sortedResults.length > 1 ? 's' : ''} trouvé${sortedResults.length > 1 ? 's' : ''}.`;
+    this.summary.textContent =
+      sortedResults.length > 1
+        ? `${baseMessage} Faites défiler la liste pour découvrir tous les individus.`
+        : baseMessage;
     const fragment = document.createDocumentFragment();
-    results.forEach((person) => {
+    sortedResults.forEach((person) => {
       const item = createResultItem(person, (selected) => {
         this.onSelect?.(selected);
         this.close();

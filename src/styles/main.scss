@@ -106,6 +106,10 @@ body {
   flex: 1 1 auto;
 }
 
+.add-person-modal__field--results {
+  gap: 0.5rem;
+}
+
 .add-person-modal__label {
   font-size: 0.85rem;
   font-weight: 600;
@@ -135,6 +139,68 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.add-person-modal__parent-summary {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.add-person-modal__parent-list {
+  margin: 0;
+  padding: 0.5rem;
+  list-style: none;
+  border: 1px solid rgba(31, 41, 51, 0.18);
+  border-radius: 0.75rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background-color: #ffffff;
+}
+
+.add-person-modal__parent-item {
+  list-style: none;
+}
+
+.add-person-modal__parent-option {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.add-person-modal__parent-option:hover,
+.add-person-modal__parent-option:focus-visible {
+  outline: none;
+  background-color: rgba(44, 110, 73, 0.1);
+  box-shadow: 0 0 0 3px rgba(44, 110, 73, 0.18);
+}
+
+.add-person-modal__parent-option--selected {
+  background-color: var(--color-primary);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(44, 110, 73, 0.28);
+}
+
+.add-person-modal__parent-option--selected:hover,
+.add-person-modal__parent-option--selected:focus-visible {
+  background-color: var(--color-secondary);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.6), 0 12px 28px rgba(44, 110, 73, 0.32);
+}
+
+.add-person-modal__parent-empty {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--color-muted);
 }
 
 .add-person-modal__legend {
