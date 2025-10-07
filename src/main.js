@@ -253,7 +253,7 @@ async function init() {
     const formElements = renderLayout();
     let treeApi = null;
     let currentLayoutMode = 'hierarchical';
-    let currentLayoutOrientation = 'horizontal';
+    let currentLayoutOrientation = 'vertical';
     let layoutMediaQuery = null;
     const defaultFocusId = findPersonIdByName(individuals, DEFAULT_FOCUS_NAME) ?? ROOT_PERSON_ID;
     let preferredFocusId = defaultFocusId;
@@ -359,16 +359,11 @@ async function init() {
 
     if (typeof window !== 'undefined') {
       layoutMediaQuery = window.matchMedia(VERTICAL_TREE_QUERY);
-      if (layoutMediaQuery.matches) {
-        currentLayoutMode = 'hierarchical';
-        currentLayoutOrientation = 'vertical';
-      } else {
-        currentLayoutMode = 'hierarchical';
-        currentLayoutOrientation = 'horizontal';
-      }
+      currentLayoutMode = 'hierarchical';
+      currentLayoutOrientation = 'vertical';
       const handleLayoutChange = () => {
         const desiredMode = 'hierarchical';
-        const desiredOrientation = layoutMediaQuery.matches ? 'vertical' : 'horizontal';
+        const desiredOrientation = 'vertical';
         if (desiredMode === currentLayoutMode && desiredOrientation === currentLayoutOrientation) {
           return;
         }
