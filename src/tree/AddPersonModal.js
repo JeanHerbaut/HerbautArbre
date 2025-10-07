@@ -2,6 +2,7 @@ import { formatPersonDisplayName } from '../utils/person.js';
 
 const NAME_PATTERN = /[^\p{L}\p{M}\s'\-]/gu;
 const COLLATOR = new Intl.Collator('fr', { sensitivity: 'base', ignorePunctuation: true });
+const DIACRITIC_PATTERN = /\p{Diacritic}/gu;
 
 function sanitizeName(value) {
   const safeValue = typeof value === 'string' ? value : '';
@@ -33,7 +34,11 @@ export class AddPersonModal {
     this.closeButton = this.dialogElement.querySelector('.modal__close');
     this.cancelButton = this.dialogElement.querySelector('.add-person-modal__cancel');
     this.errorListElement = this.dialogElement.querySelector('.add-person-modal__errors');
-    this.parentSelect = this.dialogElement.querySelector('select[name="parentId"]');
+    this.parentSearchInput = this.dialogElement.querySelector('#add-person-parent-search');
+    this.parentSummary = this.dialogElement.querySelector('.add-person-modal__parent-summary');
+    this.parentList = this.dialogElement.querySelector('.add-person-modal__parent-list');
+    this.parentHiddenInput = this.dialogElement.querySelector('input[name="parentId"]');
+    this.parentOptions = [];
     this.parentRoleInputs = this.dialogElement.querySelectorAll('input[name="parentRole"]');
     this.lastNameInput = this.dialogElement.querySelector('input[name="lastName"]');
     this.firstNameInput = this.dialogElement.querySelector('input[name="firstName"]');
@@ -47,6 +52,34 @@ export class AddPersonModal {
       event.preventDefault();
       this.close();
     });
+
+    this.parentSearchInput?.addEventListener('input', () => {
+      const query = this.parentSearchInput.value;
+      const selectedId = this.parentHiddenInput?.value ?? '';
+      const selectedOption = this.parentOptions.find((option) => option.id === selectedId);
+      if (selectedOption && query.trim() !== selectedOption.label) {
+        if (this.parentHiddenInput) {
+          this.parentHiddenInput.value = '';
+        }
+      }
+      this.#renderParentResults(query, this.parentHiddenInput?.value ?? '');
+    });
+
+    this.parentSearchInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        const [firstOption] = this.#getParentOptionButtons();
+        firstOption?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const options = this.#getParentOptionButtons();
+        if (options.length > 0) {
+          options[options.length - 1].focus();
+        }
+      }
+    });
+
+    this.parentList?.addEventListener('keydown', (event) => this.#handleParentListKeydown(event));
 
     this.formElement?.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -67,10 +100,17 @@ export class AddPersonModal {
     }
     this.formElement.reset();
     this.#renderErrors([]);
+    if (this.parentSearchInput) {
+      this.parentSearchInput.value = '';
+    }
+    if (this.parentHiddenInput) {
+      this.parentHiddenInput.value = '';
+    }
     this.#populateParentOptions(parentId);
     this.#setParentRole(parentRole);
-    if (parentId && this.parentSelect) {
-      this.parentSelect.value = parentId;
+    if (parentId) {
+      this.#selectParent(parentId, { updateSearchValue: true });
+      this.#focusParentOption(parentId);
     }
     if (this.lastNameInput) {
       this.lastNameInput.value = '';
@@ -114,32 +154,23 @@ export class AddPersonModal {
   }
 
   #populateParentOptions(selectedId = '') {
-    if (!this.parentSelect) {
+    if (!this.parentList) {
       return;
     }
     const individuals = typeof this.getIndividuals === 'function' ? this.getIndividuals() ?? [] : [];
-    const sorted = [...individuals].sort((a, b) => {
-      const labelA = formatPersonDisplayName(a) || a.name || a.id;
-      const labelB = formatPersonDisplayName(b) || b.name || b.id;
-      return COLLATOR.compare(labelA, labelB);
-    });
-    this.parentSelect.innerHTML = '';
-    const placeholder = document.createElement('option');
-    placeholder.value = '';
-    placeholder.textContent = 'Sélectionnez un parent existant';
-    this.parentSelect.appendChild(placeholder);
-    sorted.forEach((person) => {
-      if (!person?.id) {
-        return;
-      }
-      const option = document.createElement('option');
-      option.value = person.id;
-      option.textContent = formatPersonDisplayName(person) || person.name || person.id;
-      this.parentSelect.appendChild(option);
-    });
-    if (selectedId) {
-      this.parentSelect.value = selectedId;
-    }
+    const sorted = [...individuals]
+      .filter((person) => person?.id)
+      .map((person) => {
+        const label = formatPersonDisplayName(person) || person.name || person.id;
+        return {
+          id: person.id,
+          label,
+          searchLabel: this.#normalizeSearchValue(label)
+        };
+      })
+      .sort((a, b) => COLLATOR.compare(a.label, b.label));
+    this.parentOptions = sorted;
+    this.#renderParentResults(this.parentSearchInput?.value ?? '', selectedId);
   }
 
   async #handleSubmit() {
@@ -172,9 +203,10 @@ export class AddPersonModal {
     if (this.birthPlaceInput) {
       this.birthPlaceInput.value = cleanedValues.birthPlace;
     }
-    if (this.parentSelect) {
-      this.parentSelect.value = cleanedValues.parentId;
+    if (this.parentHiddenInput) {
+      this.parentHiddenInput.value = cleanedValues.parentId;
     }
+    this.#selectParent(cleanedValues.parentId);
 
     const errors = [];
     if (!cleanedValues.firstName) {
@@ -229,6 +261,167 @@ export class AddPersonModal {
     this.errorListElement.hidden = messages.length === 0;
   }
 
+  #normalizeSearchValue(value) {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(DIACRITIC_PATTERN, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  #renderParentResults(query = '', preferredId = this.parentHiddenInput?.value ?? '') {
+    if (!this.parentList) {
+      return;
+    }
+    const rawQuery = typeof query === 'string' ? query : '';
+    const normalizedQuery = this.#normalizeSearchValue(rawQuery);
+    const filtered = normalizedQuery
+      ? this.parentOptions.filter((option) => option.searchLabel.includes(normalizedQuery))
+      : [...this.parentOptions];
+
+    this.parentList.innerHTML = '';
+    this.parentList.scrollTop = 0;
+
+    if (this.parentSearchInput) {
+      this.parentSearchInput.setAttribute('aria-expanded', filtered.length > 0 ? 'true' : 'false');
+    }
+
+    const trimmedQuery = rawQuery.trim().replace(/\s+/g, ' ');
+    this.#updateParentSummary(filtered.length, trimmedQuery);
+
+    if (filtered.length === 0) {
+      const emptyItem = document.createElement('li');
+      emptyItem.className = 'add-person-modal__parent-empty';
+      emptyItem.setAttribute('role', 'none');
+      emptyItem.textContent = trimmedQuery
+        ? 'Aucun parent ne correspond à votre recherche actuelle.'
+        : 'Aucun parent n’est disponible pour le moment.';
+      this.parentList.appendChild(emptyItem);
+      this.#refreshParentOptionSelection('');
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    filtered.forEach((option) => {
+      const item = document.createElement('li');
+      item.className = 'add-person-modal__parent-item';
+      item.setAttribute('role', 'none');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'add-person-modal__parent-option';
+      button.textContent = option.label;
+      button.setAttribute('role', 'option');
+      button.dataset.value = option.id;
+      button.addEventListener('click', () => {
+        this.#selectParent(option.id);
+      });
+      item.appendChild(button);
+      fragment.appendChild(item);
+    });
+    this.parentList.appendChild(fragment);
+    this.#refreshParentOptionSelection(preferredId);
+  }
+
+  #updateParentSummary(count, query) {
+    if (!this.parentSummary) {
+      return;
+    }
+    const displayQuery = query;
+    if (count === 0) {
+      this.parentSummary.textContent = displayQuery
+        ? `Aucun parent ne correspond à « ${displayQuery} ». Modifiez les termes de recherche.`
+        : 'Aucun parent n’est disponible pour le moment.';
+      return;
+    }
+    const plural = count > 1 ? 's' : '';
+    const base = `${count} parent${plural} disponible${plural}`;
+    if (displayQuery) {
+      this.parentSummary.textContent = `${base} pour « ${displayQuery} ». Utilisez les flèches du clavier pour parcourir les résultats.`;
+    } else {
+      this.parentSummary.textContent = `${base}. Utilisez les flèches du clavier pour parcourir la liste ou tapez pour filtrer.`;
+    }
+  }
+
+  #refreshParentOptionSelection(selectedId) {
+    const buttons = this.#getParentOptionButtons();
+    buttons.forEach((button) => {
+      const isSelected = Boolean(selectedId) && button.dataset.value === selectedId;
+      button.classList.toggle('add-person-modal__parent-option--selected', isSelected);
+      button.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    });
+  }
+
+  #selectParent(parentId, { updateSearchValue = false } = {}) {
+    if (!this.parentHiddenInput) {
+      return;
+    }
+    const option = this.parentOptions.find((entry) => entry.id === parentId);
+    if (!option) {
+      this.parentHiddenInput.value = '';
+      if (updateSearchValue && this.parentSearchInput) {
+        this.parentSearchInput.value = '';
+      }
+      this.#refreshParentOptionSelection('');
+      return;
+    }
+    this.parentHiddenInput.value = option.id;
+    if (updateSearchValue && this.parentSearchInput) {
+      this.parentSearchInput.value = option.label;
+    }
+    this.#refreshParentOptionSelection(option.id);
+  }
+
+  #focusParentOption(parentId) {
+    const buttons = this.#getParentOptionButtons();
+    const target = buttons.find((button) => button.dataset.value === parentId);
+    target?.focus();
+  }
+
+  #getParentOptionButtons() {
+    if (!this.parentList) {
+      return [];
+    }
+    return Array.from(this.parentList.querySelectorAll('.add-person-modal__parent-option'));
+  }
+
+  #handleParentListKeydown(event) {
+    if (event.target?.getAttribute('role') !== 'option') {
+      return;
+    }
+    const buttons = this.#getParentOptionButtons();
+    if (buttons.length === 0) {
+      return;
+    }
+    const currentIndex = buttons.indexOf(event.target);
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const nextIndex = currentIndex < buttons.length - 1 ? currentIndex + 1 : buttons.length - 1;
+      buttons[nextIndex]?.focus();
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const nextIndex = currentIndex > 0 ? currentIndex - 1 : 0;
+      buttons[nextIndex]?.focus();
+      return;
+    }
+    if (event.key === 'Home') {
+      event.preventDefault();
+      buttons[0]?.focus();
+      return;
+    }
+    if (event.key === 'End') {
+      event.preventDefault();
+      buttons[buttons.length - 1]?.focus();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.target.click();
+    }
+  }
+
   #createDialog() {
     const dialog = document.createElement('dialog');
     dialog.className = 'modal add-person-modal';
@@ -269,10 +462,32 @@ export class AddPersonModal {
           </div>
           <fieldset class="add-person-modal__fieldset">
             <legend class="add-person-modal__legend">Lien de parenté</legend>
-            <div class="add-person-modal__field">
-              <label class="add-person-modal__label" for="add-person-parent">Parent</label>
-              <select id="add-person-parent" class="add-person-modal__input" name="parentId" required></select>
+            <div class="add-person-modal__field add-person-modal__field--search">
+              <label class="add-person-modal__label" for="add-person-parent-search">Rechercher un parent</label>
+              <input
+                id="add-person-parent-search"
+                class="add-person-modal__input add-person-modal__parent-search"
+                type="search"
+                autocomplete="off"
+                placeholder="Ex. Herbaut, Jeanne…"
+                aria-describedby="add-person-parent-summary"
+                aria-controls="add-person-parent-results"
+                aria-autocomplete="list"
+                aria-expanded="false"
+              />
             </div>
+            <div class="add-person-modal__field add-person-modal__field--results">
+              <p id="add-person-parent-summary" class="add-person-modal__parent-summary" aria-live="polite">
+                Tapez pour filtrer les parents existants, puis choisissez un résultat dans la liste.
+              </p>
+              <ul
+                id="add-person-parent-results"
+                class="add-person-modal__parent-list"
+                role="listbox"
+                aria-label="Parents disponibles"
+              ></ul>
+            </div>
+            <input type="hidden" name="parentId" />
             <div class="add-person-modal__choice-group" role="radiogroup" aria-label="Type de parent">
               <label class="add-person-modal__choice">
                 <input type="radio" name="parentRole" value="father" checked />
