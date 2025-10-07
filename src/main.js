@@ -316,7 +316,7 @@ async function init() {
 
     const searchModal = new SearchModal({
       onSelect: (person) => {
-        const focused = treeApi?.focusOnIndividual(person.id);
+        const focused = treeApi?.focusOnIndividual(person.id, { animate: true });
         if (!focused) {
           treeApi?.highlightIndividual(person.id);
         }
@@ -338,7 +338,7 @@ async function init() {
         const results = filterIndividuals(individuals, criteria);
         if (results.length === 1) {
           const [singleResult] = results;
-          const focused = treeApi?.focusOnIndividual(singleResult.id);
+          const focused = treeApi?.focusOnIndividual(singleResult.id, { animate: true });
           if (!focused) {
             treeApi?.highlightIndividual(singleResult.id);
           }

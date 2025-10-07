@@ -172,6 +172,41 @@ function splitLabelLines(label) {
   return lines;
 }
 
+function computeViewportCenterCoordinate(base, offset, viewportSpan, viewBoxSpan) {
+  const safeBase = Number.isFinite(base) ? base : 0;
+  const safeOffset = Number.isFinite(offset) ? offset : 0;
+  const safeViewportSpan = Number.isFinite(viewportSpan) && viewportSpan > 0
+    ? viewportSpan
+    : Number.isFinite(viewBoxSpan) && viewBoxSpan > 0
+    ? viewBoxSpan
+    : 0;
+  return safeBase + safeOffset + safeViewportSpan / 2;
+}
+
+function resolveViewportCenter(metrics = {}) {
+  if (
+    metrics.visibleCenter &&
+    Number.isFinite(metrics.visibleCenter.x) &&
+    Number.isFinite(metrics.visibleCenter.y)
+  ) {
+    return metrics.visibleCenter;
+  }
+  const {
+    viewBoxX = 0,
+    viewBoxY = 0,
+    viewportWidth,
+    viewportHeight,
+    viewBoxWidth,
+    viewBoxHeight,
+    offsetX = 0,
+    offsetY = 0
+  } = metrics;
+  return {
+    x: computeViewportCenterCoordinate(viewBoxX, offsetX, viewportWidth, viewBoxWidth),
+    y: computeViewportCenterCoordinate(viewBoxY, offsetY, viewportHeight, viewBoxHeight)
+  };
+}
+
 export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
   const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds, mode } = layout;
   const layoutMode = mode ?? 'fan';
@@ -344,10 +379,6 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const offsetY = Number.isFinite(renderScale) && renderScale > 0 && Number.isFinite(svgRect?.height)
       ? Math.max(0, (svgRect.height - viewBoxHeight * renderScale) / 2) / renderScale
       : 0;
-    const viewCenter = {
-      x: viewBoxX + viewBoxWidth / 2,
-      y: viewBoxY + viewBoxHeight / 2
-    };
     const candidateWidths = [
       containerElement?.clientWidth,
       containerRect?.width,
@@ -367,6 +398,10 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
     const effectiveScale = Math.max(Math.min(scaleX, scaleY), Number.EPSILON);
     const viewportWidth = width / effectiveScale;
     const viewportHeight = height / effectiveScale;
+    const visibleCenter = {
+      x: computeViewportCenterCoordinate(viewBoxX, offsetX, viewportWidth, viewBoxWidth),
+      y: computeViewportCenterCoordinate(viewBoxY, offsetY, viewportHeight, viewBoxHeight)
+    };
     return {
       width,
       height,
@@ -382,12 +417,28 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       renderScale,
       offsetX,
       offsetY,
-      viewCenter
+      visibleCenter
     };
   }
 
   function computeAutoFitTransform() {
-    const { viewportWidth, viewportHeight, viewBoxWidth, viewBoxHeight, viewCenter } = getViewportMetrics();
+    const {
+      viewportWidth,
+      viewportHeight,
+      viewBoxWidth,
+      viewBoxHeight,
+      viewBoxX,
+      viewBoxY,
+      offsetX,
+      offsetY,
+      visibleCenter
+    } = getViewportMetrics();
+    const fallbackViewportCenterX = computeViewportCenterCoordinate(viewBoxX, offsetX, viewportWidth, viewBoxWidth);
+    const fallbackViewportCenterY = computeViewportCenterCoordinate(viewBoxY, offsetY, viewportHeight, viewBoxHeight);
+    const viewportCenterX = Number.isFinite(visibleCenter?.x) ? visibleCenter.x : fallbackViewportCenterX;
+    const viewportCenterY = Number.isFinite(visibleCenter?.y) ? visibleCenter.y : fallbackViewportCenterY;
+    const safeViewportCenterX = Number.isFinite(viewportCenterX) ? viewportCenterX : fallbackViewportCenterX;
+    const safeViewportCenterY = Number.isFinite(viewportCenterY) ? viewportCenterY : fallbackViewportCenterY;
     const layoutWidth = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
       ? Math.max(bounds.maxX - bounds.minX, 1)
       : dimensions.width;
@@ -413,14 +464,14 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       scale = Math.max(AUTO_FIT_MIN_SCALE, scale);
     }
     scale = Math.max(ZOOM_EXTENT[0], Math.min(ZOOM_EXTENT[1], scale));
-    const centerX = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
+    const layoutCenterX = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
       ? (bounds.minX + bounds.maxX) / 2
       : dimensions.width / 2;
-    const centerY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
+    const layoutCenterY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
       ? (bounds.minY + bounds.maxY) / 2
       : dimensions.height / 2;
-    let translateX = viewCenter.x - centerX * scale;
-    let translateY = viewCenter.y - centerY * scale;
+    let translateX = safeViewportCenterX - layoutCenterX * scale;
+    let translateY = safeViewportCenterY - layoutCenterY * scale;
     if (preserveVerticalSpan && bounds) {
       if (Number.isFinite(bounds.minY)) {
         const marginTop = Number.isFinite(viewBoxHeight)
@@ -430,7 +481,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       }
       if (Number.isFinite(bounds.minX) && Number.isFinite(bounds.maxX)) {
         const horizontalCenter = (bounds.minX + bounds.maxX) / 2;
-        translateX = viewCenter.x - horizontalCenter * scale;
+        translateX = safeViewportCenterX - horizontalCenter * scale;
       }
     }
     return d3.zoomIdentity.translate(translateX, translateY).scale(scale);
@@ -459,7 +510,11 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
         containerElement.scrollTop = 0;
       }
     }
-    const { viewportWidth, viewportHeight, viewCenter } = getViewportMetrics();
+    const viewportMetrics = getViewportMetrics();
+    const { viewportWidth, viewportHeight } = viewportMetrics;
+    const { x: centerX, y: centerY } = resolveViewportCenter(viewportMetrics);
+    const safeCenterX = Number.isFinite(centerX) ? centerX : dimensions.width / 2;
+    const safeCenterY = Number.isFinite(centerY) ? centerY : dimensions.height / 2;
     const shortestSide = Math.min(viewportWidth, viewportHeight);
     const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
       ? shortestSide / FOCUS_TARGET_SPAN
@@ -469,8 +524,8 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       ZOOM_EXTENT[1],
       Math.max(baseScale, Number.isFinite(currentTransform.k) ? currentTransform.k : 1)
     );
-    const translateX = viewCenter.x - node.x * targetScale;
-    const translateY = viewCenter.y - node.y * targetScale;
+    const translateX = safeCenterX - node.x * targetScale;
+    const translateY = safeCenterY - node.y * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
 
     applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
@@ -482,14 +537,18 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
   }
 
   function adjustZoom(factor) {
-    const { viewportWidth, viewportHeight, viewCenter } = getViewportMetrics();
+    const viewportMetrics = getViewportMetrics();
+    const { viewportWidth, viewportHeight } = viewportMetrics;
+    const { x: centerX, y: centerY } = resolveViewportCenter(viewportMetrics);
+    const safeCenterX = Number.isFinite(centerX) ? centerX : dimensions.width / 2;
+    const safeCenterY = Number.isFinite(centerY) ? centerY : dimensions.height / 2;
     const targetScale = Math.max(
       ZOOM_EXTENT[0],
       Math.min(ZOOM_EXTENT[1], currentTransform.k * factor)
     );
-    const center = currentTransform.invert([viewCenter.x, viewCenter.y]);
-    const translateX = viewCenter.x - center[0] * targetScale;
-    const translateY = viewCenter.y - center[1] * targetScale;
+    const center = currentTransform.invert([safeCenterX, safeCenterY]);
+    const translateX = safeCenterX - center[0] * targetScale;
+    const translateY = safeCenterY - center[1] * targetScale;
     const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
     applyTransform(targetTransform);
   }
@@ -513,7 +572,7 @@ export function createTreeRenderer({ svgElement, containerElement, layout, onPer
       return;
     }
     event.preventDefault();
-    focusOnIndividual(datum.person.id);
+    focusOnIndividual(datum.person.id, { animate: true });
     onPersonSelected?.(datum.person);
   }
 
