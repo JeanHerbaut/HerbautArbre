@@ -23,6 +23,26 @@ function sanitizeNotes(notes) {
     .filter((note) => note.length > 0);
 }
 
+function sanitizeRelationIds(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const unique = new Set();
+  const sanitized = [];
+  values.forEach((value) => {
+    if (typeof value !== 'string') {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || unique.has(trimmed)) {
+      return;
+    }
+    unique.add(trimmed);
+    sanitized.push(trimmed);
+  });
+  return sanitized;
+}
+
 function sanitizeDate(value) {
   if (!value || typeof value !== 'string') {
     return '';
@@ -42,9 +62,9 @@ function normalizeIndividual(person) {
     birthDate: sanitizeDate(person?.birth?.date),
     deathDate: sanitizeDate(person?.death?.date),
     notes: sanitizeNotes(person?.annotations),
-    parents: Array.isArray(person?.parents) ? [...person.parents] : [],
-    spouses: Array.isArray(person?.spouses) ? [...person.spouses] : [],
-    children: Array.isArray(person?.children) ? [...person.children] : []
+    parents: sanitizeRelationIds(person?.parents),
+    spouses: sanitizeRelationIds(person?.spouses),
+    children: sanitizeRelationIds(person?.children)
   };
 }
 
@@ -69,7 +89,14 @@ function toChartDatum(record) {
 }
 
 export function normalizeIndividuals(individuals = []) {
-  return individuals.map((person) => normalizeIndividual(person));
+  const normalized = individuals.map((person) => normalizeIndividual(person));
+  const validIds = new Set(normalized.map((record) => record.id));
+  normalized.forEach((record) => {
+    record.parents = record.parents.filter((id) => validIds.has(id));
+    record.spouses = record.spouses.filter((id) => validIds.has(id));
+    record.children = record.children.filter((id) => validIds.has(id));
+  });
+  return normalized;
 }
 
 export function buildChartData(records = []) {
