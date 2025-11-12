@@ -54,6 +54,7 @@ let chartInstance = null;
 let cardTemplate = null;
 const recordById = new Map();
 let cachedCardDimensions = null;
+let layoutAdjustmentPending = false;
 
 function measureCardDimensions() {
   if (typeof document === 'undefined' || !document.body) {
@@ -102,14 +103,35 @@ function applyCardDimensions(dimensions) {
   }
   const width = Math.max(DEFAULT_CARD_DIMENSIONS.width, dimensions?.width ?? DEFAULT_CARD_DIMENSIONS.width);
   const height = Math.max(DEFAULT_CARD_DIMENSIONS.height, dimensions?.height ?? DEFAULT_CARD_DIMENSIONS.height);
+  const nextDimensions = { width, height };
+  if (
+    cachedCardDimensions &&
+    cachedCardDimensions.width === nextDimensions.width &&
+    cachedCardDimensions.height === nextDimensions.height
+  ) {
+    return;
+  }
   if (cardTemplate && typeof cardTemplate.setCardDim === 'function') {
-    cardTemplate.setCardDim({ width, height });
+    cardTemplate.setCardDim(nextDimensions);
   }
   const horizontalSpacing = Math.max(DEFAULT_CARD_SPACING.horizontal, width + CARD_SPACING_EXTRA.horizontal);
   const verticalSpacing = Math.max(DEFAULT_CARD_SPACING.vertical, height + CARD_SPACING_EXTRA.vertical);
   chartInstance.setCardXSpacing(horizontalSpacing);
   chartInstance.setCardYSpacing(verticalSpacing);
-  cachedCardDimensions = { width, height };
+  cachedCardDimensions = nextDimensions;
+  if (layoutAdjustmentPending) {
+    return;
+  }
+  layoutAdjustmentPending = true;
+  const triggerUpdate = () => {
+    chartInstance.updateTree({ tree_position: 'current', transition_time: 0 });
+    layoutAdjustmentPending = false;
+  };
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(triggerUpdate);
+  } else {
+    triggerUpdate();
+  }
 }
 
 function getRecordFromDatum(datum) {
@@ -296,18 +318,8 @@ function createCardTemplate() {
     if (rect) {
       const width = Math.ceil(rect.width);
       const height = Math.ceil(rect.height);
-      if (!cachedCardDimensions || width !== cachedCardDimensions.width || height !== cachedCardDimensions.height) {
-        applyCardDimensions({ width, height });
-        const triggerUpdate = () => {
-          chartInstance.updateTree({ tree_position: 'current', transition_time: 0 });
-        };
-        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(triggerUpdate);
-        } else {
-          triggerUpdate();
-        }
-        return;
-      }
+      applyCardDimensions({ width, height });
+      return;
     }
   });
   card.setCardInnerHtmlCreator((datum) => {
