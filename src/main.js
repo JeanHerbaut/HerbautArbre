@@ -1,612 +1,271 @@
-import './styles/main.scss';
-import './styles/search.scss';
-import { buildTreeLayout } from './tree/layout.js';
-import { createTreeRenderer } from './tree/renderer.js';
-import { AddPersonModal } from './tree/AddPersonModal.js';
-import { SearchPanel } from './search/SearchPanel.js';
-import { SearchModal } from './search/SearchModal.js';
-import { filterIndividuals } from './search/filter.js';
-import { formatPersonDisplayName } from './utils/person.js';
+import 'family-chart/styles/family-chart.css';
+import './styles/app.css';
+
+import * as f3 from 'family-chart';
+import {
+  normalizeIndividuals,
+  buildChartData,
+  buildDisplayName,
+  formatDates,
+  createRecordFromForm
+} from './data/format.js';
+import { setupDialog, openDialog, closeDialog } from './ui/dialog.js';
+import { createSearchPanel } from './ui/search.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
-const ROOT_PERSON_ID = 'S_3072';
-const DEFAULT_FOCUS_NAME = 'Jehan HERBAUT';
-const VERTICAL_TREE_QUERY = '(max-width: 768px)';
-const FILTER_MODAL_TRANSITION = 220;
+const DEFAULT_ROOT_ID = 'S_3072';
 
-const appElement = document.querySelector('#app');
-const modalElement = document.querySelector('#person-modal');
-const modalTitle = modalElement.querySelector('.modal__title');
-const modalBody = modalElement.querySelector('.modal__body');
-const modalClose = modalElement.querySelector('.modal__close');
+const chartContainer = document.querySelector('#family-chart');
+const personModal = setupDialog(document.querySelector('#person-modal'));
+const personModalTitle = document.querySelector('#person-modal-title');
+const personModalMeta = document.querySelector('#person-modal-meta');
+const personModalNotes = document.querySelector('#person-modal-notes');
+const addModal = setupDialog(document.querySelector('#add-person-modal'));
+const addForm = document.querySelector('#add-person-form');
+const addParentSelect = document.querySelector('#add-parent');
+const focusRootButton = document.querySelector('#focus-root');
+const openAddModalButton = document.querySelector('#open-add-modal');
 
-modalClose.addEventListener('click', () => modalElement.close());
-modalElement.addEventListener('cancel', (event) => {
-  event.preventDefault();
-  modalElement.close();
+const searchPanel = createSearchPanel({
+  input: document.querySelector('#search-input'),
+  results: document.querySelector('#search-results'),
+  onSelect: (personId) => focusOnPerson(personId, { openModal: true })
 });
 
-async function fetchData() {
+let records = [];
+let chartData = [];
+let chartInstance = null;
+const recordById = new Map();
+
+async function loadData() {
   const response = await fetch(DATA_URL);
   if (!response.ok) {
-    throw new Error(`Impossible de charger les donn\u00e9es (statut ${response.status})`);
+    throw new Error(`Impossible de charger les données (statut ${response.status})`);
   }
-  return response.json();
-}
-
-const PLACEHOLDER_NAME_PATTERN = /^Personne\s+/i;
-const BIRTH_NAME_PATTERN = /naissance d['e]\s*([\p{L}\p{M}\s'\-]+?)(?=\s+(?:n'est|est|,|\.|$))/iu;
-const CHRONICLE_NAME_PATTERN = /Chronique familiale de\s+([\p{L}\p{M}\s'\-]+)/iu;
-
-function mergeAnnotationFragments(annotations) {
-  if (!Array.isArray(annotations)) {
-    return [];
-  }
-  const merged = [];
-  let buffer = '';
-  annotations.forEach((entry) => {
-    const value = typeof entry === 'string' ? entry.trim() : '';
-    if (!value) {
-      return;
-    }
-    if (value.startsWith('- ')) {
-      if (buffer) {
-        merged.push(buffer);
-        buffer = '';
-      }
-      merged.push(value);
-      return;
-    }
-    buffer = buffer ? `${buffer} ${value}` : value;
-    if (/[.!?;:]$/.test(value)) {
-      merged.push(buffer);
-      buffer = '';
-    }
+  const data = await response.json();
+  records = normalizeIndividuals(data?.individuals ?? []);
+  records.forEach((record) => {
+    recordById.set(record.id, record);
   });
-  if (buffer) {
-    merged.push(buffer);
-  }
-  return merged;
+  chartData = buildChartData(records);
 }
 
-function deriveNameFromAnnotations(annotations) {
-  if (!Array.isArray(annotations)) {
-    return null;
+function createCardTemplate() {
+  if (!chartInstance) {
+    return;
   }
-  for (const annotation of annotations) {
-    const text = typeof annotation === 'string' ? annotation.trim() : '';
-    if (!text) {
-      continue;
-    }
-    const birthMatch = text.match(BIRTH_NAME_PATTERN);
-    if (birthMatch && birthMatch[1]) {
-      return birthMatch[1].replace(/\s+/g, ' ').trim();
-    }
-  }
-  for (const annotation of annotations) {
-    const text = typeof annotation === 'string' ? annotation.trim() : '';
-    if (!text) {
-      continue;
-    }
-    const chronicleMatch = text.match(CHRONICLE_NAME_PATTERN);
-    if (chronicleMatch && chronicleMatch[1]) {
-      return text.replace(/\s+/g, ' ').trim();
-    }
-  }
-  return null;
-}
-
-function normalizeComparableText(value) {
-  if (!value) {
-    return '';
-  }
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function findPersonIdByName(individuals, targetName) {
-  const normalizedTarget = normalizeComparableText(targetName);
-  if (!normalizedTarget) {
-    return null;
-  }
-  for (const person of individuals) {
-    if (!person) {
-      continue;
-    }
-    const candidates = [person.name, formatPersonDisplayName(person)].filter(Boolean);
-    for (const candidate of candidates) {
-      if (normalizeComparableText(candidate) === normalizedTarget) {
-        return person.id;
-      }
-    }
-  }
-  return null;
-}
-
-function normalizeIndividuals(individuals) {
-  return individuals.map((person) => {
-    const normalizedAnnotations = mergeAnnotationFragments(person.annotations);
-    const updates = {};
-    if (normalizedAnnotations.length > 0) {
-      updates.annotations = normalizedAnnotations;
-    }
-    const annotationSource = normalizedAnnotations.length > 0
-      ? normalizedAnnotations
-      : Array.isArray(person.annotations)
-      ? person.annotations
-      : [];
-    if (person.name && PLACEHOLDER_NAME_PATTERN.test(person.name)) {
-      const derivedName = deriveNameFromAnnotations(annotationSource);
-      if (derivedName) {
-        updates.name = derivedName;
-      }
-    }
-    if (Object.keys(updates).length === 0) {
-      return person;
-    }
-    return {
-      ...person,
-      ...updates
-    };
-  });
-}
-
-let generatedPersonCounter = 0;
-
-function generateUniquePersonId(individuals = []) {
-  const existingIds = new Set(individuals.map((person) => person?.id).filter(Boolean));
-  let candidate = '';
-  do {
-    generatedPersonCounter += 1;
-    candidate = `AP_${generatedPersonCounter.toString(36).toUpperCase()}`;
-  } while (existingIds.has(candidate));
-  return candidate;
-}
-
-function createBirthInfo({ birthDate, birthPlace }) {
-  if (!birthDate && !birthPlace) {
-    return null;
-  }
-  return {
-    date: birthDate || null,
-    place: birthPlace || null
-  };
-}
-
-function determineParentRoleFromGender(person) {
-  const gender = person?.gender ? String(person.gender).toLowerCase() : '';
-  if (gender.startsWith('f')) {
-    return 'mother';
-  }
-  if (gender.startsWith('m')) {
-    return 'father';
-  }
-  return null;
-}
-
-function buildPersonName({ firstName, lastName }) {
-  const parts = [firstName, lastName]
-    .map((value) => (typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : ''))
-    .filter(Boolean);
-  return parts.join(' ');
-}
-
-function renderLayout() {
-  appElement.innerHTML = `
-    <div class="app__layout app__layout--immersive">
-      <section class="tree-view" aria-label="Arbre généalogique">
-        <header class="tree-view__toolbar">
-          <div class="tree-toolbar">
-            <div class="tree-toolbar__controls" role="group" aria-label="Contrôles du zoom">
-              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-out" aria-label="Zoom arrière">−</button>
-              <button type="button" class="tree-toolbar__button" data-tree-action="reset" aria-label="Réinitialiser la vue">Réinitialiser</button>
-              <button type="button" class="tree-toolbar__button" data-tree-action="zoom-in" aria-label="Zoom avant">+</button>
-            </div>
-            <div class="tree-toolbar__actions" role="group" aria-label="Gestion de l'arbre">
-              <button type="button" class="tree-toolbar__button tree-toolbar__button--primary" data-tree-action="add-person">Ajouter</button>
-            </div>
-            <div class="tree-legend" aria-hidden="true">
-              <div class="tree-legend__item">
-                <span class="tree-legend__marker tree-legend__marker--branch"></span>
-                <span class="tree-legend__label">Branche familiale</span>
-              </div>
-              <div class="tree-legend__item">
-                <span class="tree-legend__marker tree-legend__marker--union"></span>
-                <span class="tree-legend__label">Union / Mariage</span>
-              </div>
-              <div class="tree-legend__item">
-                <span class="tree-legend__marker tree-legend__marker--focus"></span>
-                <span class="tree-legend__label">Individu sélectionné</span>
-              </div>
-            </div>
-          </div>
-        </header>
-        <div class="tree-view__canvas" tabindex="0">
-          <div class="tree-view__chart" role="presentation"></div>
-        </div>
-      </section>
-      <button
-        type="button"
-        class="filters-button"
-        data-filter-action="open"
-        aria-haspopup="dialog"
-        aria-controls="filters-modal"
-        aria-expanded="false"
-      >
-        Filtres
-      </button>
-      <div class="filters-modal" data-filter-modal hidden aria-hidden="true">
-        <div
-          class="filters-modal__dialog"
-          id="filters-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="filters-modal-title"
-          tabindex="-1"
-        >
-          <header class="filters-modal__header">
-            <h2 id="filters-modal-title" class="filters-modal__title">Filtres de recherche</h2>
-            <button
-              type="button"
-              class="filters-modal__close"
-              data-filter-action="close"
-              aria-label="Fermer les filtres"
-            >
-              Fermer
-            </button>
-          </header>
-          <div class="filters-modal__body">
-            <div class="search-panel" role="presentation">
-              <div class="search-panel__container" id="filters-modal-container"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  return {
-    searchPanelContainer: appElement.querySelector('#filters-modal-container'),
-    treeCanvas: appElement.querySelector('.tree-view__canvas'),
-    treeChart: appElement.querySelector('.tree-view__chart'),
-    zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
-    zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
-    resetViewButton: appElement.querySelector('[data-tree-action="reset"]'),
-    addPersonButton: appElement.querySelector('[data-tree-action="add-person"]'),
-    filtersButton: appElement.querySelector('[data-filter-action="open"]'),
-    filtersCloseButton: appElement.querySelector('[data-filter-action="close"]'),
-    filtersModal: appElement.querySelector('[data-filter-modal]'),
-    filtersDialog: appElement.querySelector('.filters-modal__dialog')
-  };
-}
-
-function formatPersonDetails(person) {
-  const details = [];
-  if (person.name) {
-    details.push(`<strong>Nom</strong> : ${person.name}`);
-  }
-  if (person.sosa) {
-    details.push(`<strong>Num\u00e9ro Sosa</strong> : ${person.sosa}`);
-  }
-  if (person.birth?.date || person.birth?.place) {
-    const birth = [person.birth?.date, person.birth?.place].filter(Boolean).join(' \u2013 ');
-    details.push(`<strong>Naissance</strong> : ${birth}`);
-  }
-  if (person.death?.date || person.death?.place) {
-    const death = [person.death?.date, person.death?.place].filter(Boolean).join(' \u2013 ');
-    details.push(`<strong>D\u00e9c\u00e8s</strong> : ${death}`);
-  }
-  if (person.parents) {
-    const parentDetails = [person.parents.father, person.parents.mother].filter(Boolean).join(', ');
-    if (parentDetails) {
-      details.push(`<strong>Parents</strong> : ${parentDetails}`);
-    }
-  }
-  if (person.spouses) {
-    const spouseDetails = Array.isArray(person.spouses) ? person.spouses.join(', ') : person.spouses;
-    if (spouseDetails) {
-      details.push(`<strong>Conjoints</strong> : ${spouseDetails}`);
-    }
-  }
-  if (Array.isArray(person.annotations) && person.annotations.length > 0) {
-    const annotations = person.annotations.map((annotation) => `<li>${annotation}</li>`).join('');
-    details.push(`<strong>Notes</strong> : <ul class="modal__annotations">${annotations}</ul>`);
-  }
-  return details.join('<br />');
-}
-
-function openPersonModal(person) {
-  modalTitle.textContent = formatPersonDisplayName(person) || person.name || person.id;
-  modalBody.innerHTML = formatPersonDetails(person);
-  if (!modalElement.open) {
-    modalElement.showModal();
-  }
-}
-
-async function init() {
-  try {
-    const data = await fetchData();
-    const rawIndividuals = Array.isArray(data.individuals) ? data.individuals : [];
-    let individuals = normalizeIndividuals(rawIndividuals);
-    let relationships = Array.isArray(data.relationships) ? data.relationships : [];
-    const formElements = renderLayout();
-    let openFilters = () => {};
-    let closeFilters = () => {};
-    let lastFilterTrigger = null;
-    let treeApi = null;
-    let currentLayoutMode = 'hierarchical';
-    let currentLayoutOrientation = 'vertical';
-    let layoutMediaQuery = null;
-    const defaultFocusId = findPersonIdByName(individuals, DEFAULT_FOCUS_NAME) ?? ROOT_PERSON_ID;
-    let preferredFocusId = defaultFocusId;
-
-    const renderTree = (modeOrOptions = {}, { animateFocus = false } = {}) => {
-      const options =
-        typeof modeOrOptions === 'string' ? { mode: modeOrOptions } : modeOrOptions ?? {};
-      const {
-        mode = currentLayoutMode,
-        orientation = currentLayoutOrientation,
-        focusId = null
-      } = options;
-      currentLayoutMode = mode;
-      const normalizedOrientation =
-        orientation ?? currentLayoutOrientation ?? 'horizontal';
-      currentLayoutOrientation = normalizedOrientation;
-      const layout = buildTreeLayout(individuals, relationships, {
-        mode: currentLayoutMode,
-        orientation: currentLayoutOrientation
-      });
-      const previousHighlight = focusId ?? treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
-      treeApi?.destroy();
-      treeApi = createTreeRenderer({
-        chartElement: formElements.treeChart,
-        containerElement: formElements.treeCanvas,
-        layout,
-        onPersonSelected: (person) => {
-          openPersonModal(person);
-        }
-      });
-      const targetId = previousHighlight || defaultFocusId || ROOT_PERSON_ID;
-      const applyInitialFocus = ({ animate } = {}) => {
-        const focused = treeApi.focusOnIndividual(targetId, { animate });
-        if (!focused) {
-          treeApi.highlightIndividual(targetId, { focusView: false });
-        }
-        preferredFocusId = treeApi.highlightedId ?? targetId ?? preferredFocusId;
-      };
-
-      applyInitialFocus({ animate: animateFocus });
-
-      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(() => {
-          applyInitialFocus({ animate: false });
-        });
-      }
-      if (typeof window !== 'undefined') {
-        window.herbautTree = treeApi;
-      }
-    };
-
-    if (formElements.zoomInButton) {
-      formElements.zoomInButton.addEventListener('click', () => treeApi?.zoomIn());
-    }
-    if (formElements.zoomOutButton) {
-      formElements.zoomOutButton.addEventListener('click', () => treeApi?.zoomOut());
-    }
-    if (formElements.resetViewButton) {
-      formElements.resetViewButton.addEventListener('click', () => treeApi?.resetView());
-    }
-
-    const addPersonModal = new AddPersonModal({
-      getIndividuals: () => individuals,
-      onSubmit: (values) => {
-        const parent = individuals.find((person) => person.id === values.parentId);
-        if (!parent) {
-          return { success: false, error: 'Le parent sélectionné est introuvable.' };
-        }
-        const newId = generateUniquePersonId(individuals);
-        const personName = buildPersonName({ firstName: values.firstName, lastName: values.lastName }) || newId;
-        const parentDisplayName = formatPersonDisplayName(parent) || parent.name || parent.id;
-        const parentsInfo =
-          values.parentRole === 'mother'
-            ? { mother: parentDisplayName }
-            : { father: parentDisplayName };
-        const generation = parent.generation ? Number.parseInt(parent.generation, 10) : null;
-        const newPerson = {
-          id: newId,
-          name: personName,
-          gender: values.gender || null,
-          generation: Number.isInteger(generation) ? String(generation + 1) : null,
-          sosa: null,
-          birth: createBirthInfo({ birthDate: values.birthDate, birthPlace: values.birthPlace }),
-          death: null,
-          parents: parentsInfo,
-          spouses: null,
-          children: null,
-          annotations: []
-        };
-        const updatedIndividuals = individuals.map((person) => {
-          if (person.id !== parent.id) {
-            return person;
-          }
-          const existingChildren = Array.isArray(person.children) ? [...person.children] : [];
-          if (!existingChildren.includes(newPerson.id)) {
-            existingChildren.push(newPerson.id);
-          }
-          return {
-            ...person,
-            children: existingChildren
-          };
-        });
-        individuals = [...updatedIndividuals, newPerson];
-        relationships = [
-          ...relationships,
-          {
-            type: 'parent-child',
-            source: parent.id,
-            target: newPerson.id,
-            context: 'ajout manuel'
-          }
-        ];
-        preferredFocusId = newPerson.id;
-        renderTree(
-          { mode: currentLayoutMode, orientation: currentLayoutOrientation, focusId: newPerson.id },
-          { animateFocus: true }
-        );
-        return { success: true, created: newPerson };
-      }
-    });
-    addPersonModal.mount(document.body);
-
-    if (formElements.addPersonButton) {
-      formElements.addPersonButton.addEventListener('click', () => {
-        const highlightedId = treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
-        const highlightedPerson = individuals.find((person) => person.id === highlightedId);
-        const suggestedRole = determineParentRoleFromGender(highlightedPerson);
-        addPersonModal.open({ parentId: highlightedPerson?.id ?? '', parentRole: suggestedRole });
-      });
-    }
-
-    const searchModal = new SearchModal({
-      onSelect: (person) => {
-        const focused = treeApi?.focusOnIndividual(person.id, { animate: true });
-        if (!focused) {
-          treeApi?.highlightIndividual(person.id);
-        }
-        preferredFocusId = treeApi?.highlightedId ?? person.id ?? preferredFocusId;
-      }
-    });
-    searchModal.mount(document.body);
-
-    const searchPanel = new SearchPanel({
-      onSearch: (criteria) => {
-        const hasCriteria =
-          (criteria.lastName && criteria.lastName.length > 0) ||
-          (criteria.firstName && criteria.firstName.length > 0) ||
-          (criteria.birthDate && criteria.birthDate.length > 0);
-        if (!hasCriteria) {
-          searchModal.close();
-          return;
-        }
-        closeFilters();
-        const results = filterIndividuals(individuals, criteria);
-        if (results.length === 1) {
-          const [singleResult] = results;
-          const focused = treeApi?.focusOnIndividual(singleResult.id, { animate: true });
-          if (!focused) {
-            treeApi?.highlightIndividual(singleResult.id);
-          }
-          preferredFocusId = treeApi?.highlightedId ?? singleResult.id ?? preferredFocusId;
-          searchModal.close();
-          return;
-        }
-        searchModal.open(results);
-      }
-    });
-
-    searchPanel.mount(formElements.searchPanelContainer);
-    const filtersModalElement = formElements.filtersModal;
-    const filtersDialogElement = formElements.filtersDialog;
-    const filtersButtonElement = formElements.filtersButton;
-    const filtersCloseButtonElement = formElements.filtersCloseButton;
-
-    closeFilters = () => {
-      if (!filtersModalElement || filtersModalElement.hasAttribute('hidden')) {
-        return;
-      }
-      filtersModalElement.classList.remove('filters-modal--open');
-      filtersModalElement.setAttribute('aria-hidden', 'true');
-      const restoreTarget = lastFilterTrigger;
-      window.setTimeout(() => {
-        filtersModalElement.setAttribute('hidden', 'true');
-        if (filtersButtonElement) {
-          filtersButtonElement.setAttribute('aria-expanded', 'false');
-        }
-        if (restoreTarget && typeof restoreTarget.focus === 'function') {
-          restoreTarget.focus({ preventScroll: true });
-        }
-        lastFilterTrigger = null;
-      }, FILTER_MODAL_TRANSITION);
-    };
-
-    openFilters = () => {
-      if (!filtersModalElement || !filtersModalElement.hasAttribute('hidden')) {
-        return;
-      }
-      lastFilterTrigger =
-        document.activeElement instanceof HTMLElement ? document.activeElement : filtersButtonElement;
-      filtersModalElement.removeAttribute('hidden');
-      filtersModalElement.setAttribute('aria-hidden', 'false');
-      if (filtersButtonElement) {
-        filtersButtonElement.setAttribute('aria-expanded', 'true');
-      }
-      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-        window.requestAnimationFrame(() => {
-          filtersModalElement.classList.add('filters-modal--open');
-          filtersDialogElement?.focus({ preventScroll: true });
-          searchPanel.focus();
-        });
-        return;
-      }
-      filtersModalElement.classList.add('filters-modal--open');
-      filtersDialogElement?.focus({ preventScroll: true });
-      searchPanel.focus();
-    };
-
-    if (filtersButtonElement) {
-      filtersButtonElement.addEventListener('click', () => openFilters());
-    }
-    if (filtersCloseButtonElement) {
-      filtersCloseButtonElement.addEventListener('click', () => closeFilters());
-    }
-    if (filtersModalElement) {
-      filtersModalElement.addEventListener('click', (event) => {
-        if (event.target === filtersModalElement) {
-          closeFilters();
-        }
-      });
-      filtersModalElement.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          closeFilters();
-        }
-      });
-    }
-
-    if (typeof window !== 'undefined') {
-      layoutMediaQuery = window.matchMedia(VERTICAL_TREE_QUERY);
-      currentLayoutMode = 'hierarchical';
-      currentLayoutOrientation = 'vertical';
-      const handleLayoutChange = () => {
-        const desiredMode = 'hierarchical';
-        const desiredOrientation = 'vertical';
-        if (desiredMode === currentLayoutMode && desiredOrientation === currentLayoutOrientation) {
-          return;
-        }
-        currentLayoutMode = desiredMode;
-        currentLayoutOrientation = desiredOrientation;
-        renderTree({ mode: currentLayoutMode, orientation: currentLayoutOrientation }, { animateFocus: false });
-      };
-      if (typeof layoutMediaQuery.addEventListener === 'function') {
-        layoutMediaQuery.addEventListener('change', handleLayoutChange);
-      } else if (typeof layoutMediaQuery.addListener === 'function') {
-        layoutMediaQuery.addListener(handleLayoutChange);
-      }
-    }
-
-    renderTree({ mode: currentLayoutMode, orientation: currentLayoutOrientation }, { animateFocus: false });
-  } catch (error) {
-    appElement.innerHTML = `
-      <div class="app__error">
-        <h1>Erreur de chargement</h1>
-        <p>${error.message}</p>
+  const card = chartInstance.setCardHtml();
+  card.setStyle('rect');
+  card.setCardInnerHtmlCreator((datum) => {
+    const payload = datum?.data || {};
+    const personId = payload?.id || datum?.id;
+    const record = personId ? recordById.get(personId) : null;
+    const name = buildDisplayName(record) || payload.displayName || personId;
+    const birth = payload.birthDate ? `° ${payload.birthDate}` : '';
+    const death = payload.deathDate ? `† ${payload.deathDate}` : '';
+    const dates = [birth, death].filter(Boolean).join('<br />');
+    return `
+      <div class="f3-card-body">
+        <div class="f3-card-title">${name || datum.id}</div>
+        ${dates ? `<div class="f3-card-subtitle">${dates}</div>` : ''}
       </div>
     `;
+  });
+  card.setOnCardClick((event, datum) => {
+    event?.stopPropagation();
+    focusOnPerson(datum.data.id);
+    openPersonModal(datum.data.id);
+  });
+}
+
+function initializeChart() {
+  if (!chartContainer) {
+    throw new Error('Impossible de trouver le conteneur du graphique');
+  }
+  chartInstance = f3.createChart(chartContainer, chartData);
+  createCardTemplate();
+  chartInstance.updateTree({ initial: true, tree_position: 'fit', transition_time: 600 });
+}
+
+function openPersonModal(personId) {
+  const record = recordById.get(personId);
+  if (!record) {
+    return;
+  }
+  const name = buildDisplayName(record);
+  if (personModalTitle) {
+    personModalTitle.textContent = name;
+  }
+  if (personModalMeta) {
+    personModalMeta.innerHTML = '';
+    const metaEntries = [];
+    if (record.birthDate) {
+      metaEntries.push({ label: 'Naissance', value: record.birthDate });
+    }
+    if (record.deathDate) {
+      metaEntries.push({ label: 'Décès', value: record.deathDate });
+    }
+    if (metaEntries.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'person-modal__note';
+      empty.textContent = 'Aucune information chronologique disponible.';
+      personModalMeta.appendChild(empty);
+    } else {
+      metaEntries.forEach((entry) => {
+        const item = document.createElement('div');
+        item.className = 'person-modal__meta-item';
+        const label = document.createElement('span');
+        label.className = 'person-modal__meta-label';
+        label.textContent = entry.label;
+        const value = document.createElement('span');
+        value.className = 'person-modal__meta-value';
+        value.textContent = entry.value;
+        item.appendChild(label);
+        item.appendChild(value);
+        personModalMeta.appendChild(item);
+      });
+    }
+  }
+  if (personModalNotes) {
+    personModalNotes.innerHTML = '';
+    if (record.notes.length === 0) {
+      const emptyNote = document.createElement('p');
+      emptyNote.className = 'person-modal__note';
+      emptyNote.textContent = 'Aucune note enregistrée.';
+      personModalNotes.appendChild(emptyNote);
+    } else {
+      record.notes.forEach((note) => {
+        const paragraph = document.createElement('p');
+        paragraph.className = 'person-modal__note';
+        paragraph.textContent = note;
+        personModalNotes.appendChild(paragraph);
+      });
+    }
+  }
+  openDialog(personModal);
+}
+
+function focusOnPerson(personId, { openModal = false } = {}) {
+  if (!chartInstance || !personId) {
+    return;
+  }
+  const target = recordById.get(personId);
+  if (!target) {
+    return;
+  }
+  chartInstance.store.updateMainId(personId);
+  chartInstance.updateTree({ tree_position: 'main_to_middle', transition_time: 650 });
+  if (openModal) {
+    openPersonModal(personId);
   }
 }
 
-init();
+function refreshSearchIndex() {
+  const entries = records.map((record) => ({
+    id: record.id,
+    label: buildDisplayName(record),
+    dates: formatDates(record).join(' — ')
+  }));
+  searchPanel.update(entries);
+}
+
+function populateParentSelect(defaultId = '') {
+  if (!addParentSelect) {
+    return;
+  }
+  addParentSelect.innerHTML = '';
+  const emptyOption = document.createElement('option');
+  emptyOption.value = '';
+  emptyOption.textContent = 'Sans parent direct';
+  addParentSelect.appendChild(emptyOption);
+  records
+    .slice()
+    .sort((a, b) => buildDisplayName(a).localeCompare(buildDisplayName(b), 'fr', { sensitivity: 'base' }))
+    .forEach((record) => {
+      const option = document.createElement('option');
+      option.value = record.id;
+      option.textContent = buildDisplayName(record);
+      addParentSelect.appendChild(option);
+    });
+  if (defaultId) {
+    addParentSelect.value = defaultId;
+  }
+}
+
+function setupAddModal() {
+  if (!addModal || !addForm) {
+    return;
+  }
+  addModal.addEventListener('close', () => {
+    addForm.reset();
+  });
+  if (openAddModalButton) {
+    openAddModalButton.addEventListener('click', () => {
+      const currentMain = chartInstance?.store.getMainId?.() ?? DEFAULT_ROOT_ID;
+      populateParentSelect(currentMain);
+      openDialog(addModal);
+      const firstNameInput = addForm.querySelector('#add-first-name');
+      window.requestAnimationFrame(() => {
+        firstNameInput?.focus();
+      });
+    });
+  }
+  addForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const formData = new FormData(addForm);
+    const values = Object.fromEntries(formData.entries());
+    const parentId = typeof values.parentId === 'string' ? values.parentId.trim() : '';
+    const newRecord = createRecordFromForm(values, parentId);
+    records.push(newRecord);
+    recordById.set(newRecord.id, newRecord);
+    if (parentId) {
+      const parentRecord = recordById.get(parentId);
+      if (parentRecord) {
+        if (!parentRecord.children.includes(newRecord.id)) {
+          parentRecord.children.push(newRecord.id);
+        }
+        if (!newRecord.parents.includes(parentId)) {
+          newRecord.parents.push(parentId);
+        }
+      }
+    }
+    chartData = buildChartData(records);
+    chartInstance.updateData(chartData);
+    refreshSearchIndex();
+    closeDialog(addModal);
+    focusOnPerson(newRecord.id, { openModal: true });
+  });
+}
+
+function setupRootFocus() {
+  if (!focusRootButton) {
+    return;
+  }
+  focusRootButton.addEventListener('click', () => {
+    const rootId = recordById.has(DEFAULT_ROOT_ID) ? DEFAULT_ROOT_ID : records[0]?.id;
+    if (rootId) {
+      focusOnPerson(rootId);
+    }
+  });
+}
+
+async function bootstrap() {
+  await loadData();
+  initializeChart();
+  refreshSearchIndex();
+  setupAddModal();
+  setupRootFocus();
+  const initialId = recordById.has(DEFAULT_ROOT_ID) ? DEFAULT_ROOT_ID : records[0]?.id;
+  if (initialId) {
+    focusOnPerson(initialId);
+  }
+}
+
+bootstrap().catch((error) => {
+  console.error(error);
+  const errorBanner = document.createElement('p');
+  errorBanner.textContent = 'Une erreur est survenue lors du chargement des données.';
+  errorBanner.style.padding = '1rem 2rem';
+  errorBanner.style.color = '#b91c1c';
+  chartContainer?.replaceChildren(errorBanner);
+});

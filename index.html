@@ -7,16 +7,93 @@
     <title>Famille Herbaut</title>
   </head>
   <body>
-    <div id="app" class="app"></div>
-    <dialog id="person-modal" class="modal modal--person">
+    <div id="app" class="app">
+      <header class="app__header">
+        <h1 class="app__title">Famille Herbaut</h1>
+        <div class="controls">
+          <div class="search-panel" id="search-panel">
+            <input
+              id="search-input"
+              class="search-panel__input"
+              type="search"
+              placeholder="Rechercher un membre"
+              autocomplete="off"
+              aria-label="Rechercher dans l'arbre"
+            />
+            <div id="search-results" class="search-panel__results" role="listbox"></div>
+          </div>
+          <button type="button" id="focus-root" class="button button--ghost">
+            Revenir à l'origine
+          </button>
+          <button type="button" id="open-add-modal" class="button button--primary">
+            Ajouter une personne
+          </button>
+        </div>
+      </header>
+      <main class="app__content">
+        <div id="family-chart" class="family-chart-container" aria-label="Arbre généalogique"></div>
+      </main>
+    </div>
+
+    <dialog id="person-modal" class="modal" aria-labelledby="person-modal-title">
       <article class="modal__content">
-        <button type="button" class="modal__close" aria-label="Fermer">&times;</button>
         <header class="modal__header">
-          <h2 class="modal__title"></h2>
+          <h2 id="person-modal-title" class="modal__title"></h2>
+          <button type="button" class="modal__close" data-close-modal>&times;</button>
         </header>
-        <section class="modal__body"></section>
+        <section class="person-modal__meta" id="person-modal-meta"></section>
+        <section class="person-modal__notes" id="person-modal-notes"></section>
       </article>
     </dialog>
+
+    <dialog id="add-person-modal" class="modal" aria-labelledby="add-person-modal-title">
+      <article class="modal__content">
+        <header class="modal__header">
+          <h2 id="add-person-modal-title" class="modal__title">Ajouter une personne</h2>
+          <button type="button" class="modal__close" data-close-modal>&times;</button>
+        </header>
+        <form class="add-modal__form" id="add-person-form">
+          <div class="form-field">
+            <label for="add-last-name">Nom</label>
+            <input id="add-last-name" name="lastName" type="text" autocomplete="family-name" />
+          </div>
+          <div class="form-field">
+            <label for="add-first-name">Prénom</label>
+            <input id="add-first-name" name="firstName" type="text" autocomplete="given-name" />
+          </div>
+          <div class="form-field">
+            <label for="add-gender">Genre</label>
+            <select id="add-gender" name="gender">
+              <option value="M">Masculin</option>
+              <option value="F">Féminin</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="add-birth">Date de naissance</label>
+            <input id="add-birth" name="birthDate" type="text" placeholder="Ex. 12 mars 1950" />
+          </div>
+          <div class="form-field">
+            <label for="add-death">Date de décès</label>
+            <input id="add-death" name="deathDate" type="text" placeholder="Ex. 08 avril 2012" />
+          </div>
+          <div class="form-field">
+            <label for="add-parent">Parent direct</label>
+            <select id="add-parent" name="parentId"></select>
+          </div>
+          <div class="form-field">
+            <label for="add-notes">Notes</label>
+            <textarea id="add-notes" name="notes" placeholder="Informations supplémentaires"></textarea>
+          </div>
+          <div class="modal__actions">
+            <button type="button" class="button button--ghost" data-close-modal>
+              Annuler
+            </button>
+            <button type="submit" class="button button--primary">Enregistrer</button>
+          </div>
+        </form>
+      </article>
+    </dialog>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
