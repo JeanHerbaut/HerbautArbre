@@ -117,6 +117,74 @@ function computeCardTimeline(record, details) {
   };
 }
 
+function extractYearFromText(value) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+  const match = value.match(/(\d{4})/u);
+  if (!match) {
+    return null;
+  }
+  const year = Number.parseInt(match[1], 10);
+  return Number.isFinite(year) ? year : null;
+}
+
+function parseGenerationValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+  const numeric = Number.parseInt(value, 10);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getComparableDetailsFromDatum(datum) {
+  const record = getRecordFromDatum(datum);
+  const payload = datum?.data?.data || datum?.data || {};
+  const birthDate = record?.birthDate || payload?.birthDate || '';
+  const generation = record?.generation || payload?.generation || '';
+  let name = '';
+  if (record) {
+    name = buildDisplayName(record);
+  }
+  if (!name) {
+    const fallbackName = [payload?.displayName, [payload?.firstName, payload?.lastName].filter(Boolean).join(' ')]
+      .map((candidate) => (typeof candidate === 'string' ? candidate.trim() : ''))
+      .find((candidate) => candidate.length > 0);
+    name = fallbackName || (datum?.id ?? '');
+  }
+  return { birthDate, generation, name };
+}
+
+function compareByGenerationAndBirth(a, b) {
+  const detailsA = getComparableDetailsFromDatum(a);
+  const detailsB = getComparableDetailsFromDatum(b);
+  const generationA = parseGenerationValue(detailsA.generation);
+  const generationB = parseGenerationValue(detailsB.generation);
+  if (generationA !== null || generationB !== null) {
+    const normalizedA = generationA ?? Number.POSITIVE_INFINITY;
+    const normalizedB = generationB ?? Number.POSITIVE_INFINITY;
+    if (normalizedA !== normalizedB) {
+      return normalizedA - normalizedB;
+    }
+  }
+  const birthYearA = extractYearFromText(detailsA.birthDate);
+  const birthYearB = extractYearFromText(detailsB.birthDate);
+  if (birthYearA !== null || birthYearB !== null) {
+    const normalizedA = birthYearA ?? Number.POSITIVE_INFINITY;
+    const normalizedB = birthYearB ?? Number.POSITIVE_INFINITY;
+    if (normalizedA !== normalizedB) {
+      return normalizedA - normalizedB;
+    }
+  }
+  return detailsA.name.localeCompare(detailsB.name, 'fr', {
+    ignorePunctuation: true,
+    sensitivity: 'base'
+  });
+}
+
 async function loadData() {
   const response = await fetch(DATA_URL);
   if (!response.ok) {
@@ -207,10 +275,11 @@ function initializeChart() {
     throw new Error('Impossible de trouver le conteneur du graphique');
   }
   chartInstance = f3.createChart(chartContainer, chartData);
-  chartInstance.setCardXSpacing(160);
-  chartInstance.setCardYSpacing(110);
+  chartInstance.setOrientationVertical();
+  chartInstance.setCardXSpacing(220);
+  chartInstance.setCardYSpacing(165);
   chartInstance.setTransitionTime(650);
-  chartInstance.setOrientationHorizontal();
+  chartInstance.setSortChildrenFunction(compareByGenerationAndBirth);
   createCardTemplate();
   chartInstance.updateTree({ initial: true, tree_position: 'fit', transition_time: 600 });
 }
