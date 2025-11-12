@@ -16,10 +16,13 @@
               id="search-input"
               class="search-panel__input"
               type="search"
-              placeholder="Rechercher un membre"
+              placeholder="Nom, prénom ou date de naissance"
               autocomplete="off"
               aria-label="Rechercher dans l'arbre"
             />
+            <button type="button" id="search-button" class="button button--ghost search-panel__button">
+              Rechercher
+            </button>
             <div id="search-results" class="search-panel__results" role="listbox"></div>
           </div>
           <button type="button" id="focus-root" class="button button--ghost">
@@ -43,6 +46,17 @@
         </header>
         <section class="person-modal__meta" id="person-modal-meta"></section>
         <section class="person-modal__notes" id="person-modal-notes"></section>
+      </article>
+    </dialog>
+
+    <dialog id="search-modal" class="modal" aria-labelledby="search-modal-title">
+      <article class="modal__content">
+        <header class="modal__header">
+          <h2 id="search-modal-title" class="modal__title">Résultats de recherche</h2>
+          <button type="button" class="modal__close" data-close-modal>&times;</button>
+        </header>
+        <p id="search-modal-message" class="search-modal__message"></p>
+        <div id="search-modal-results" class="search-modal__results"></div>
       </article>
     </dialog>
 
