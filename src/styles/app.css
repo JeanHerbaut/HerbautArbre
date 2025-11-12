@@ -144,26 +144,29 @@ body {
 .family-chart-container {
   height: calc(100vh - 8rem);
   min-height: 32rem;
-  background: #ffffff;
-  border-radius: 1rem;
-  box-shadow: 0 10px 40px rgba(15, 23, 42, 0.12);
-  padding: 1rem;
+  background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
+  border-radius: 1.1rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 25px 55px rgba(15, 23, 42, 0.12);
+  padding: 1.25rem;
   overflow: hidden;
-}
-
-.family-chart-container {
-  height: 100%;
-  --background-color: transparent;
-  --text-color: #0f172a;
 }
 
 .family-chart-container svg.main_svg {
   background: transparent;
 }
 
-.family-chart-container .links_view .link {
-  stroke: rgba(148, 163, 184, 0.55);
-  stroke-width: 2px;
+.family-chart-container .links_view path {
+  stroke: rgba(71, 85, 105, 0.68);
+  stroke-width: 2.75px;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.family-chart-container .links_view path.marriage,
+.family-chart-container .links_view path[stroke-dasharray] {
+  stroke-dasharray: 6 4;
+  opacity: 0.75;
 }
 
 .family-chart-container .cards_layer {
@@ -185,44 +188,158 @@ body {
 }
 
 .family-chart-container .f3-card-body {
-  padding: 0.85rem 0.95rem;
-  min-width: 10rem;
-  border-radius: 0.85rem;
-  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  min-width: 12rem;
+  border-radius: 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 18px 35px rgba(15, 23, 42, 0.18);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
 .family-chart-container .f3-card.f3-card--male .f3-card-body {
-  background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+  background: linear-gradient(135deg, #6a8bb8, #3f7191) !important;
   color: #ffffff;
-  box-shadow: 0 12px 30px rgba(29, 78, 216, 0.22);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .family-chart-container .f3-card.f3-card--female .f3-card-body {
-  background: linear-gradient(135deg, #ec4899, #f472b6) !important;
+  background: linear-gradient(135deg, #f29dc5, #d46b95) !important;
   color: #ffffff;
-  box-shadow: 0 12px 30px rgba(236, 72, 153, 0.22);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .family-chart-container .f3-card.f3-card--unknown .f3-card-body {
-  background: linear-gradient(135deg, #94a3b8, #cbd5f5) !important;
-  color: #111827;
-  box-shadow: 0 12px 30px rgba(148, 163, 184, 0.25);
+  background: linear-gradient(135deg, #c7d2fe, #94a3b8) !important;
+  color: #0f172a;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .family-chart-container .f3-card:hover .f3-card-body,
 .family-chart-container .f3-card.f3-card--active .f3-card-body {
   transform: translateY(-3px);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.22);
+}
+
+.f3-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.f3-card-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.18);
+  color: inherit;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.family-chart-container .f3-card.f3-card--unknown .f3-card-avatar {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+.f3-card-avatar-text {
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.05em;
+}
+
+.f3-card-avatar-icon {
+  width: 1.4rem;
+  height: 1.4rem;
+  fill: currentColor;
+  opacity: 0.85;
+}
+
+.f3-card-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .f3-card-title {
   font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
 }
 
-.f3-card-subtitle {
-  margin-top: 0.35rem;
-  font-size: 0.8rem;
+.f3-card-metadata {
+  font-size: 0.75rem;
   opacity: 0.85;
+}
+
+.f3-card-actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
+.f3-card-action {
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+}
+
+.family-chart-container .f3-card.f3-card--unknown .f3-card-action {
+  background: rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+}
+
+.f3-card-action::before {
+  content: '+';
+  font-size: 1rem;
+  font-weight: 600;
+  color: inherit;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -52%);
+}
+
+.f3-card-action--spouse::before {
+  content: '\2665';
+  font-size: 0.95rem;
+}
+
+.f3-card-timeline {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  opacity: 0.92;
+}
+
+.f3-card-tags {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.f3-card-tag {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+}
+
+.family-chart-container .f3-card.f3-card--female .f3-card-tag,
+.family-chart-container .f3-card.f3-card--male .f3-card-tag {
+  background: rgba(15, 23, 42, 0.2);
+}
+
+.family-chart-container .f3-card.f3-card--unknown .f3-card-tag {
+  background: rgba(15, 23, 42, 0.12);
 }
 
 .app__actions {
