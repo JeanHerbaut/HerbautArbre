@@ -11,6 +11,7 @@ import {
 } from './data/format.js';
 import { setupDialog, openDialog, closeDialog } from './ui/dialog.js';
 import { createSearchPanel } from './ui/search.js';
+import { getFallbackCardLabel } from './utils/card-label.js';
 
 const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const DEFAULT_ROOT_ID = 'S_3072';
@@ -153,24 +154,49 @@ function normalizeCandidate(value, fallbackId = '') {
   return trimmed;
 }
 
-function computeCardDisplayName({ record, details, personId }) {
+function computeCardDisplayName({ record, details, personId, datum, findRecordById }) {
   const candidates = [
     normalizeCandidate(record?.displayName, personId),
     normalizeCandidate([record?.firstName, record?.lastName].filter(Boolean).join(' '), personId),
     normalizeCandidate(details?.displayName, personId),
     normalizeCandidate([details?.firstName, details?.lastName].filter(Boolean).join(' '), personId)
   ].filter(Boolean);
-  if (candidates.length > 0) {
-    return candidates[0];
+  const candidate = candidates.length > 0 ? candidates[0] : '';
+  const fallbackFromCandidate = getFallbackCardLabel({
+    datum,
+    personId,
+    record,
+    details,
+    findRecordById,
+    preferredCandidate: candidate
+  });
+  if (fallbackFromCandidate) {
+    return fallbackFromCandidate;
   }
-  return 'Nom non renseigné';
+  if (candidate) {
+    return {
+      value: candidate,
+      isArtificial: false,
+      reason: 'record'
+    };
+  }
+  return (
+    getFallbackCardLabel({ datum, personId, record, details, findRecordById }) || {
+      value: 'Nom non renseigné',
+      isArtificial: true,
+      reason: 'unknown'
+    }
+  );
 }
 
-function computeCardInitials(name) {
-  if (!name || typeof name !== 'string') {
+function computeCardInitials(nameInfo) {
+  if (!nameInfo || typeof nameInfo !== 'object') {
     return '';
   }
-  const parts = name
+  if (nameInfo.isArtificial) {
+    return '';
+  }
+  const parts = nameInfo.value
     .split(/\s+/u)
     .filter(Boolean)
     .slice(0, 2);
@@ -327,8 +353,15 @@ function createCardTemplate() {
     const personId = payload?.id || datum?.id;
     const record = getRecordFromDatum(datum);
     const dataDetails = payload?.data || {};
-    const displayName = computeCardDisplayName({ record, details: dataDetails, personId });
-    const initials = computeCardInitials(displayName);
+    const displayNameInfo = computeCardDisplayName({
+      record,
+      details: dataDetails,
+      personId,
+      datum,
+      findRecordById: (targetId) => recordById.get(targetId) ?? null
+    });
+    const initials = computeCardInitials(displayNameInfo);
+    const displayName = displayNameInfo.value;
     const { timelineText, sosa } = computeCardTimeline(record, dataDetails);
     const generation = normalizeCandidate(record?.generation || dataDetails?.generation || '');
     const genderValue = (record?.gender || dataDetails.gender || 'U').toUpperCase();
