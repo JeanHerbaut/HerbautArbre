@@ -30,6 +30,10 @@ const searchModal = setupDialog(document.querySelector('#search-modal'));
 const searchModalMessage = document.querySelector('#search-modal-message');
 const searchModalResults = document.querySelector('#search-modal-results');
 
+const DEFAULT_CARD_DIMENSIONS = Object.freeze({ width: 220, height: 70 });
+const DEFAULT_CARD_SPACING = Object.freeze({ horizontal: 220, vertical: 165 });
+const CARD_SPACING_EXTRA = Object.freeze({ horizontal: 20, vertical: 95 });
+
 const searchPanel = createSearchPanel({
   fields: {
     lastName: document.querySelector('#search-last-name'),
@@ -48,6 +52,62 @@ let records = [];
 let chartData = [];
 let chartInstance = null;
 const recordById = new Map();
+let cachedCardDimensions = null;
+
+function measureCardDimensions() {
+  if (typeof document === 'undefined' || !document.body) {
+    return null;
+  }
+  const probe = document.createElement('div');
+  probe.style.position = 'absolute';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.zIndex = '-1';
+  probe.innerHTML = `
+    <div class="card f3-card f3-card--male">
+      <div class="card-inner f3-card-body">
+        <div class="f3-card-header">
+          <div class="f3-card-avatar"><span class="f3-card-avatar-text">MH</span></div>
+          <div class="f3-card-summary">
+            <div class="f3-card-title">Magdeleine HERBAUT</div>
+            <div class="f3-card-metadata">Génération 3</div>
+          </div>
+          <div class="f3-card-actions" aria-hidden="true">
+            <span class="f3-card-action f3-card-action--kin"></span>
+            <span class="f3-card-action f3-card-action--spouse"></span>
+          </div>
+        </div>
+        <div class="f3-card-timeline">° 01/01/1900 — Lille · † 02/02/1970 — Paris</div>
+        <div class="f3-card-tags"><span class="f3-card-tag">Sosa 1</span></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(probe);
+  const cardElement = probe.querySelector('.card');
+  const rect = cardElement?.getBoundingClientRect() || null;
+  probe.remove();
+  if (!rect) {
+    return null;
+  }
+  return {
+    width: Math.ceil(rect.width),
+    height: Math.ceil(rect.height)
+  };
+}
+
+function applyCardDimensions(dimensions) {
+  if (!chartInstance) {
+    return;
+  }
+  const width = Math.max(DEFAULT_CARD_DIMENSIONS.width, dimensions?.width ?? DEFAULT_CARD_DIMENSIONS.width);
+  const height = Math.max(DEFAULT_CARD_DIMENSIONS.height, dimensions?.height ?? DEFAULT_CARD_DIMENSIONS.height);
+  chartInstance.setCardDim({ width, height });
+  const horizontalSpacing = Math.max(DEFAULT_CARD_SPACING.horizontal, width + CARD_SPACING_EXTRA.horizontal);
+  const verticalSpacing = Math.max(DEFAULT_CARD_SPACING.vertical, height + CARD_SPACING_EXTRA.vertical);
+  chartInstance.setCardXSpacing(horizontalSpacing);
+  chartInstance.setCardYSpacing(verticalSpacing);
+  cachedCardDimensions = { width, height };
+}
 
 function getRecordFromDatum(datum) {
   const personId = datum?.data?.id || datum?.id;
@@ -225,6 +285,23 @@ function createCardTemplate() {
     cardElement.classList.add(genderClass);
     const isMainCard = cardElement.classList.contains('card-main');
     cardElement.classList.toggle('f3-card--active', Boolean(isMainCard));
+    const rect = cardElement.getBoundingClientRect();
+    if (rect) {
+      const width = Math.ceil(rect.width);
+      const height = Math.ceil(rect.height);
+      if (!cachedCardDimensions || width !== cachedCardDimensions.width || height !== cachedCardDimensions.height) {
+        applyCardDimensions({ width, height });
+        const triggerUpdate = () => {
+          chartInstance.updateTree({ tree_position: 'current', transition_time: 0 });
+        };
+        if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(triggerUpdate);
+        } else {
+          triggerUpdate();
+        }
+        return;
+      }
+    }
   });
   card.setCardInnerHtmlCreator((datum) => {
     const payload = datum?.data || {};
@@ -276,8 +353,7 @@ function initializeChart() {
   }
   chartInstance = f3.createChart(chartContainer, chartData);
   chartInstance.setOrientationVertical();
-  chartInstance.setCardXSpacing(220);
-  chartInstance.setCardYSpacing(165);
+  applyCardDimensions(measureCardDimensions());
   chartInstance.setTransitionTime(650);
   chartInstance.setSortChildrenFunction(compareByGenerationAndBirth);
   createCardTemplate();
