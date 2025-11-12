@@ -51,6 +51,7 @@ const searchPanel = createSearchPanel({
 let records = [];
 let chartData = [];
 let chartInstance = null;
+let cardTemplate = null;
 const recordById = new Map();
 let cachedCardDimensions = null;
 
@@ -101,7 +102,9 @@ function applyCardDimensions(dimensions) {
   }
   const width = Math.max(DEFAULT_CARD_DIMENSIONS.width, dimensions?.width ?? DEFAULT_CARD_DIMENSIONS.width);
   const height = Math.max(DEFAULT_CARD_DIMENSIONS.height, dimensions?.height ?? DEFAULT_CARD_DIMENSIONS.height);
-  chartInstance.setCardDim({ width, height });
+  if (cardTemplate && typeof cardTemplate.setCardDim === 'function') {
+    cardTemplate.setCardDim({ width, height });
+  }
   const horizontalSpacing = Math.max(DEFAULT_CARD_SPACING.horizontal, width + CARD_SPACING_EXTRA.horizontal);
   const verticalSpacing = Math.max(DEFAULT_CARD_SPACING.vertical, height + CARD_SPACING_EXTRA.vertical);
   chartInstance.setCardXSpacing(horizontalSpacing);
@@ -263,6 +266,10 @@ function createCardTemplate() {
     return;
   }
   const card = chartInstance.setCardHtml();
+  cardTemplate = card;
+  if (cachedCardDimensions) {
+    card.setCardDim(cachedCardDimensions);
+  }
   card.setStyle('rect');
   card.setMiniTree(false);
   card.setOnCardUpdate(function (datum) {
@@ -353,10 +360,10 @@ function initializeChart() {
   }
   chartInstance = f3.createChart(chartContainer, chartData);
   chartInstance.setOrientationVertical();
-  applyCardDimensions(measureCardDimensions());
   chartInstance.setTransitionTime(650);
   chartInstance.setSortChildrenFunction(compareByGenerationAndBirth);
   createCardTemplate();
+  applyCardDimensions(measureCardDimensions());
   chartInstance.updateTree({ initial: true, tree_position: 'fit', transition_time: 600 });
 }
 
