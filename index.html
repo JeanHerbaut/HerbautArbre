@@ -12,18 +12,44 @@
         <h1 class="app__title">Famille Herbaut</h1>
         <div class="controls">
           <div class="search-panel" id="search-panel">
-            <input
-              id="search-input"
-              class="search-panel__input"
-              type="search"
-              placeholder="Nom, prénom ou date de naissance"
-              autocomplete="off"
-              aria-label="Rechercher dans l'arbre"
-            />
+            <div class="search-panel__fields">
+              <div class="search-panel__field">
+                <label class="search-panel__label" for="search-last-name">Nom</label>
+                <input
+                  id="search-last-name"
+                  class="search-panel__input"
+                  type="search"
+                  placeholder="Ex. Herbaut"
+                  autocomplete="family-name"
+                  autocapitalize="words"
+                />
+              </div>
+              <div class="search-panel__field">
+                <label class="search-panel__label" for="search-first-name">Prénom</label>
+                <input
+                  id="search-first-name"
+                  class="search-panel__input"
+                  type="search"
+                  placeholder="Ex. Jean"
+                  autocomplete="given-name"
+                  autocapitalize="words"
+                />
+              </div>
+              <div class="search-panel__field">
+                <label class="search-panel__label" for="search-birth">Naissance</label>
+                <input
+                  id="search-birth"
+                  class="search-panel__input"
+                  type="search"
+                  placeholder="Date ou lieu"
+                  autocomplete="off"
+                />
+              </div>
+              <div id="search-results" class="search-panel__results" role="listbox"></div>
+            </div>
             <button type="button" id="search-button" class="button button--ghost search-panel__button">
               Rechercher
             </button>
-            <div id="search-results" class="search-panel__results" role="listbox"></div>
           </div>
           <button type="button" id="focus-root" class="button button--ghost">
             Revenir à l'origine

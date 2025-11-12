@@ -15,27 +15,88 @@ function normalizeText(value) {
     .toLowerCase();
 }
 
-function buildSearchValue({ label, firstName, lastName, birthDate, birthPlace, dates }) {
-  return normalizeText(
-    [label, firstName, lastName, birthDate, birthPlace, dates]
-      .filter((part) => part && part.length > 0)
-      .join(' ')
-  );
+function buildEntryTokens({ firstName, lastName, birthDate, birthPlace, label, dates }) {
+  const nameParts = [firstName, lastName].filter(Boolean).join(' ');
+  const birthInfo = [birthDate, birthPlace].filter(Boolean).join(' ');
+  const combined = [label, dates, birthInfo].filter(Boolean).join(' ');
+  return {
+    lastName: normalizeText(lastName),
+    firstName: normalizeText(firstName),
+    birth: normalizeText(birthInfo),
+    combined: normalizeText(combined || nameParts)
+  };
 }
 
-export function createSearchPanel({ input, results, button, modal, modalMessage, modalResults, onSelect }) {
-  if (!input || !results || !button || !modal || !modalMessage || !modalResults) {
-    throw new Error('Search panel requires input, button, modal and container elements');
+function buildQueryLabel({ lastName, firstName, birth }) {
+  const parts = [];
+  if (lastName) {
+    parts.push(`Nom : ${lastName}`);
   }
+  if (firstName) {
+    parts.push(`Prénom : ${firstName}`);
+  }
+  if (birth) {
+    parts.push(`Naissance : ${birth}`);
+  }
+  return parts.join(' · ');
+}
+
+export function createSearchPanel({ fields, results, button, modal, modalMessage, modalResults, onSelect }) {
+  const lastNameInput = fields?.lastName ?? null;
+  const firstNameInput = fields?.firstName ?? null;
+  const birthInput = fields?.birth ?? null;
+  if (!lastNameInput || !firstNameInput || !birthInput || !results || !button || !modal || !modalMessage || !modalResults) {
+    throw new Error('Search panel requires three input fields, results container, button and modal elements');
+  }
+  const inputs = [lastNameInput, firstNameInput, birthInput];
   let searchRecords = [];
 
   function clearSuggestions() {
     results.innerHTML = '';
   }
 
-  function clearInput() {
-    input.value = '';
+  function clearInputs() {
+    inputs.forEach((input) => {
+      input.value = '';
+    });
     clearSuggestions();
+  }
+
+  function getRawQuery() {
+    return {
+      lastName: lastNameInput.value.trim(),
+      firstName: firstNameInput.value.trim(),
+      birth: birthInput.value.trim()
+    };
+  }
+
+  function getNormalizedQuery() {
+    const raw = getRawQuery();
+    return {
+      lastName: normalizeText(raw.lastName),
+      firstName: normalizeText(raw.firstName),
+      birth: normalizeText(raw.birth)
+    };
+  }
+
+  function hasQuery(query) {
+    return Object.values(query).some((value) => value && value.length > 0);
+  }
+
+  function matchesQuery(entry, query) {
+    if (query.lastName && !entry.tokens.lastName.includes(query.lastName)) {
+      return false;
+    }
+    if (query.firstName && !entry.tokens.firstName.includes(query.firstName)) {
+      return false;
+    }
+    if (query.birth) {
+      const birthMatches = entry.tokens.birth.includes(query.birth) || entry.tokens.combined.includes(query.birth);
+      if (!birthMatches) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function renderSuggestions(matches) {
@@ -51,7 +112,7 @@ export function createSearchPanel({ input, results, button, modal, modalMessage,
       `;
       buttonElement.addEventListener('mousedown', (event) => event.preventDefault());
       buttonElement.addEventListener('click', () => {
-        clearInput();
+        clearInputs();
         onSelect?.(entry.id);
       });
       results.appendChild(buttonElement);
@@ -61,11 +122,15 @@ export function createSearchPanel({ input, results, button, modal, modalMessage,
   function openResultsModal(matches, queryLabel) {
     modalResults.innerHTML = '';
     if (matches.length === 0) {
-      modalMessage.textContent = `Aucun membre trouvé pour « ${queryLabel} ».`;
+      modalMessage.textContent = queryLabel
+        ? `Aucun membre trouvé pour « ${queryLabel} ».`
+        : 'Aucun membre ne correspond à votre recherche.';
       openDialog(modal);
       return;
     }
-    modalMessage.textContent = `Plusieurs membres correspondent à « ${queryLabel} ». Sélectionnez la bonne personne.`;
+    modalMessage.textContent = queryLabel
+      ? `Plusieurs membres correspondent à « ${queryLabel} ». Sélectionnez la bonne personne.`
+      : 'Plusieurs membres correspondent à votre recherche. Sélectionnez la bonne personne.';
     matches.forEach((entry) => {
       const option = document.createElement('button');
       option.type = 'button';
@@ -78,7 +143,7 @@ export function createSearchPanel({ input, results, button, modal, modalMessage,
       `;
       option.addEventListener('click', () => {
         closeDialog(modal);
-        clearInput();
+        clearInputs();
         onSelect?.(entry.id);
       });
       modalResults.appendChild(option);
@@ -87,49 +152,51 @@ export function createSearchPanel({ input, results, button, modal, modalMessage,
   }
 
   function executeSearch() {
-    const rawQuery = input.value.trim();
-    const normalized = normalizeText(rawQuery);
-    const tokens = normalized.split(' ').filter(Boolean);
-    if (tokens.length === 0) {
+    const normalizedQuery = getNormalizedQuery();
+    if (!hasQuery(normalizedQuery)) {
       modalResults.innerHTML = '';
-      modalMessage.textContent = "Veuillez saisir un nom, un prénom et/ou une date de naissance.";
+      modalMessage.textContent = 'Veuillez renseigner au moins un champ de recherche.';
       openDialog(modal);
       return;
     }
     clearSuggestions();
-    const matches = searchRecords.filter((entry) => tokens.every((token) => entry.searchValue.includes(token)));
+    const matches = searchRecords.filter((entry) => matchesQuery(entry, normalizedQuery));
     if (matches.length === 1) {
-      clearInput();
+      clearInputs();
       onSelect?.(matches[0].id);
       return;
     }
-    openResultsModal(matches, rawQuery || normalized);
+    const queryLabel = buildQueryLabel(getRawQuery());
+    openResultsModal(matches, queryLabel);
   }
 
   function handleInput() {
-    const query = normalizeText(input.value);
-    if (!query) {
+    const normalizedQuery = getNormalizedQuery();
+    if (!hasQuery(normalizedQuery)) {
       clearSuggestions();
       return;
     }
-    const matches = searchRecords.filter((entry) => entry.searchValue.includes(query));
+    const matches = searchRecords.filter((entry) => matchesQuery(entry, normalizedQuery));
     renderSuggestions(matches);
   }
 
-  input.addEventListener('input', handleInput);
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      executeSearch();
-    } else if (event.key === 'Escape') {
-      clearInput();
-    }
-  });
-
-  input.addEventListener('focus', () => {
-    if (input.value) {
-      handleInput();
-    }
+  inputs.forEach((input) => {
+    input.addEventListener('input', handleInput);
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        executeSearch();
+      } else if (event.key === 'Escape') {
+        input.value = '';
+        handleInput();
+      }
+    });
+    input.addEventListener('focus', () => {
+      const normalizedQuery = getNormalizedQuery();
+      if (hasQuery(normalizedQuery)) {
+        handleInput();
+      }
+    });
   });
 
   button.addEventListener('click', () => {
@@ -144,11 +211,11 @@ export function createSearchPanel({ input, results, button, modal, modalMessage,
         dates: record.dates,
         birthDate: record.birthDate,
         birthPlace: record.birthPlace,
-        searchValue: buildSearchValue(record)
+        tokens: buildEntryTokens(record)
       }));
     },
     clear() {
-      clearInput();
+      clearInputs();
     }
   };
 }
