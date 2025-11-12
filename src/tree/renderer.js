@@ -2,11 +2,11 @@ import { createApp, defineComponent, h, onBeforeUnmount, onMounted, ref, shallow
 import VueECharts from 'vue-echarts';
 import { use } from 'echarts/core';
 import { GraphChart } from 'echarts/charts';
-import { TooltipComponent } from 'echarts/components';
+import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { formatPersonDisplayName } from '../utils/person.js';
 
-use([GraphChart, TooltipComponent, CanvasRenderer]);
+use([GraphChart, TooltipComponent, GridComponent, CanvasRenderer]);
 
 const BRANCH_COLORS = ['#2c6e49', '#4c956c', '#386fa4', '#7f4f24', '#bc4749', '#9c89b8'];
 const HIERARCHY_LINK_COLOR = 'rgba(44, 110, 73, 0.35)';
