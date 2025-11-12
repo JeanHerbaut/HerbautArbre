@@ -291,23 +291,48 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
     }
   });
 
-  const runWhenReady = (action) => {
-    if (chartInstance) {
-      action(chartInstance);
+  const flushPendingActions = () => {
+    if (!chartInstance || typeof chartInstance.getModel !== 'function') {
       return;
     }
-    pendingActions.push(action);
-  };
-
-  const handleChartReady = (chart) => {
-    chartInstance = chart;
-    pendingActions.splice(0).forEach((task) => {
+    const model = chartInstance.getModel();
+    if (!model) {
+      return;
+    }
+    const tasks = pendingActions.splice(0);
+    tasks.forEach((task) => {
       try {
         task(chartInstance);
       } catch (error) {
         console.error('Tree renderer task failed', error);
       }
     });
+  };
+
+  const runWhenReady = (action) => {
+    if (chartInstance && typeof chartInstance.getModel === 'function' && chartInstance.getModel()) {
+      action(chartInstance);
+      return;
+    }
+    pendingActions.push(action);
+  };
+
+  const detachChartListeners = () => {
+    if (chartInstance && typeof chartInstance.off === 'function') {
+      chartInstance.off('finished', flushPendingActions);
+    }
+  };
+
+  const handleChartReady = (chart) => {
+    if (chartInstance && chartInstance !== chart) {
+      detachChartListeners();
+    }
+    chartInstance = chart;
+    if (chartInstance && typeof chartInstance.on === 'function') {
+      chartInstance.off('finished', flushPendingActions);
+      chartInstance.on('finished', flushPendingActions);
+    }
+    flushPendingActions();
   };
 
   const handleNodeClick = (params) => {
@@ -331,6 +356,7 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
       });
 
       onBeforeUnmount(() => {
+        detachChartListeners();
         chartInstance = null;
       });
 
@@ -440,6 +466,7 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
   }
 
   function destroy() {
+    detachChartListeners();
     vueApp.unmount();
     if (chartElement.contains(mountElement)) {
       chartElement.removeChild(mountElement);
