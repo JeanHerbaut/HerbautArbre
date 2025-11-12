@@ -13,6 +13,7 @@ const HIERARCHY_LINK_COLOR = 'rgba(44, 110, 73, 0.35)';
 const UNION_LINK_COLOR = '#c96480';
 const SECONDARY_LINK_COLOR = '#9c89b8';
 const HIGHLIGHT_COLOR = '#f2545b';
+const VIEW_PADDING = 48;
 
 function resolveBranchColor(branchIndex) {
   if (!Number.isInteger(branchIndex)) {
@@ -107,16 +108,26 @@ function buildTooltipContent(person) {
 
 function buildChartNodes(layout) {
   const nodes = Array.isArray(layout?.nodes) ? layout.nodes : [];
+  const bounds = layout?.bounds ?? {
+    minX: 0,
+    maxX: layout?.dimensions?.width ?? 0,
+    minY: 0,
+    maxY: layout?.dimensions?.height ?? 0
+  };
+  const offsetX = (bounds?.minX ?? 0) - VIEW_PADDING;
+  const offsetY = (bounds?.minY ?? 0) - VIEW_PADDING;
   return nodes.map((node) => {
     const branchColor = resolveBranchColor(node.branchIndex);
     const labelPlacement = resolveLabelPlacement(node, layout);
     const labelText = buildLabelText(node);
+    const normalizedX = (node.x ?? 0) - offsetX;
+    const normalizedY = (node.y ?? 0) - offsetY;
     return {
       id: node.person?.id ?? node.id,
       value: node.person?.id ?? node.id,
       name: labelText,
-      x: node.x,
-      y: node.y,
+      x: normalizedX,
+      y: normalizedY,
       person: node.person ?? null,
       nodeId: node.id,
       branchIndex: node.branchIndex ?? null,
@@ -184,8 +195,14 @@ function buildChartLinks(layout) {
 function buildChartOption(layout) {
   const chartNodes = buildChartNodes(layout);
   const chartLinks = buildChartLinks(layout);
-  const bounds = layout?.bounds ?? { minX: 0, maxX: layout?.dimensions?.width ?? 0, minY: 0, maxY: layout?.dimensions?.height ?? 0 };
-  const padding = 48;
+  const bounds = layout?.bounds ?? {
+    minX: 0,
+    maxX: layout?.dimensions?.width ?? 0,
+    minY: 0,
+    maxY: layout?.dimensions?.height ?? 0
+  };
+  const viewWidth = Math.max((bounds.maxX ?? 0) - (bounds.minX ?? 0) + VIEW_PADDING * 2, 0);
+  const viewHeight = Math.max((bounds.maxY ?? 0) - (bounds.minY ?? 0) + VIEW_PADDING * 2, 0);
   return {
     animation: false,
     tooltip: {
@@ -203,31 +220,19 @@ function buildChartOption(layout) {
         return params?.name ?? '';
       }
     },
-    grid: { left: '1%', right: '1%', top: '1%', bottom: '1%' },
-    xAxis: {
-      type: 'value',
-      min: (bounds.minX ?? 0) - padding,
-      max: (bounds.maxX ?? 0) + padding,
-      show: false,
-      scale: true
-    },
-    yAxis: {
-      type: 'value',
-      min: (bounds.minY ?? 0) - padding,
-      max: (bounds.maxY ?? 0) + padding,
-      show: false,
-      inverse: true,
-      scale: true
-    },
     series: [
       {
         type: 'graph',
-        coordinateSystem: 'cartesian2d',
+        coordinateSystem: null,
         layout: 'none',
         data: chartNodes,
         links: chartLinks,
         roam: true,
         draggable: false,
+        left: 0,
+        top: 0,
+        width: viewWidth,
+        height: viewHeight,
         silent: false,
         focusNodeAdjacency: true,
         edgeSymbol: ['none', 'none'],
