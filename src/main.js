@@ -55,7 +55,11 @@ let chartInstance = null;
 let cardTemplate = null;
 const recordById = new Map();
 let cachedCardDimensions = null;
-let layoutAdjustmentPending = false;
+let chartUpdateScheduled = false;
+let pendingTreePosition = 'current';
+let lastViewportSize = null;
+let resizeObserver = null;
+let windowResizeHandler = null;
 
 function measureCardDimensions() {
   if (typeof document === 'undefined' || !document.body) {
@@ -120,18 +124,96 @@ function applyCardDimensions(dimensions) {
   chartInstance.setCardXSpacing(horizontalSpacing);
   chartInstance.setCardYSpacing(verticalSpacing);
   cachedCardDimensions = nextDimensions;
-  if (layoutAdjustmentPending) {
+  scheduleChartUpdate('current');
+}
+
+function scheduleChartUpdate(treePosition = 'current') {
+  if (!chartInstance) {
     return;
   }
-  layoutAdjustmentPending = true;
+  if (treePosition === 'fit') {
+    pendingTreePosition = 'fit';
+  } else if (pendingTreePosition !== 'fit') {
+    pendingTreePosition = treePosition;
+  }
+  if (chartUpdateScheduled) {
+    return;
+  }
+  chartUpdateScheduled = true;
   const triggerUpdate = () => {
-    chartInstance.updateTree({ tree_position: 'current', transition_time: 0 });
-    layoutAdjustmentPending = false;
+    chartUpdateScheduled = false;
+    const nextTreePosition = pendingTreePosition;
+    pendingTreePosition = 'current';
+    chartInstance.updateTree({ tree_position: nextTreePosition, transition_time: 0 });
   };
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     window.requestAnimationFrame(triggerUpdate);
   } else {
     triggerUpdate();
+  }
+}
+
+function updateChartViewportSize(width, height, { force = false, schedule = true } = {}) {
+  if (!chartContainer) {
+    return false;
+  }
+  const svg = chartContainer.querySelector('svg.main_svg');
+  if (!svg) {
+    return false;
+  }
+  const measuredWidth = Math.max(0, Math.round(width));
+  const measuredHeight = Math.max(0, Math.round(height));
+  if (!measuredWidth || !measuredHeight) {
+    return false;
+  }
+  const hasChanged =
+    force ||
+    !lastViewportSize ||
+    lastViewportSize.width !== measuredWidth ||
+    lastViewportSize.height !== measuredHeight;
+  if (!hasChanged) {
+    return false;
+  }
+  lastViewportSize = { width: measuredWidth, height: measuredHeight };
+  const widthValue = String(measuredWidth);
+  const heightValue = String(measuredHeight);
+  svg.setAttribute('width', widthValue);
+  svg.setAttribute('height', heightValue);
+  svg.setAttribute('viewBox', `0 0 ${measuredWidth} ${measuredHeight}`);
+  const backgroundRect = svg.querySelector('rect');
+  if (backgroundRect) {
+    backgroundRect.setAttribute('width', widthValue);
+    backgroundRect.setAttribute('height', heightValue);
+  }
+  if (schedule) {
+    scheduleChartUpdate('fit');
+  }
+  return true;
+}
+
+function setupChartResizeHandling() {
+  if (!chartContainer || resizeObserver || windowResizeHandler) {
+    return;
+  }
+  const rect = chartContainer.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0) {
+    updateChartViewportSize(rect.width, rect.height, { force: true, schedule: false });
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver((entries) => {
+      entries
+        .filter((entry) => entry.target === chartContainer)
+        .forEach((entry) => {
+          updateChartViewportSize(entry.contentRect.width, entry.contentRect.height);
+        });
+    });
+    resizeObserver.observe(chartContainer);
+  } else if (typeof window !== 'undefined') {
+    windowResizeHandler = () => {
+      const nextRect = chartContainer.getBoundingClientRect();
+      updateChartViewportSize(nextRect.width, nextRect.height);
+    };
+    window.addEventListener('resize', windowResizeHandler);
   }
 }
 
@@ -409,6 +491,7 @@ function initializeChart() {
   chartInstance.setSortChildrenFunction(compareByGenerationAndBirth);
   createCardTemplate();
   applyCardDimensions(measureCardDimensions());
+  setupChartResizeHandling();
   chartInstance.updateTree({ initial: true, tree_position: 'fit', transition_time: 600 });
 }
 
