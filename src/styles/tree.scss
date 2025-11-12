@@ -153,10 +153,32 @@
 }
 
 
-.tree-view__svg {
+.tree-view__chart {
   width: 100%;
   height: 100%;
   display: block;
+}
+
+.tree-chart__root {
+  width: 100%;
+  height: 100%;
+}
+
+.tree-chart__tooltip {
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.tree-chart__tooltip strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 0.25rem;
+}
+
+.tree-chart__tooltip span {
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-right: 0.35rem;
 }
 
 @media (min-width: 1024px) {
@@ -165,7 +187,7 @@
     min-height: min(80vh, 1000px);
   }
 
-  .tree-view__svg {
+  .tree-view__chart {
     min-height: 100%;
     max-height: 1000px;
   }
@@ -285,7 +307,7 @@
     justify-content: flex-start;
   }
 
-  .tree-view__svg {
+  .tree-view__chart {
     min-height: 480px;
   }
 }

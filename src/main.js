@@ -226,7 +226,7 @@ function renderLayout() {
           </div>
         </header>
         <div class="tree-view__canvas" tabindex="0">
-          <svg class="tree-view__svg" role="presentation"></svg>
+          <div class="tree-view__chart" role="presentation"></div>
         </div>
       </section>
       <aside class="search-panel" aria-labelledby="search-panel-title">
@@ -238,7 +238,7 @@ function renderLayout() {
   return {
     searchPanelContainer: appElement.querySelector('#search-panel-container'),
     treeCanvas: appElement.querySelector('.tree-view__canvas'),
-    treeSvg: appElement.querySelector('.tree-view__svg'),
+    treeChart: appElement.querySelector('.tree-view__chart'),
     zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
     zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
     resetViewButton: appElement.querySelector('[data-tree-action="reset"]'),
@@ -322,7 +322,7 @@ async function init() {
       const previousHighlight = focusId ?? treeApi?.highlightedId ?? preferredFocusId ?? defaultFocusId;
       treeApi?.destroy();
       treeApi = createTreeRenderer({
-        svgElement: formElements.treeSvg,
+        chartElement: formElements.treeChart,
         containerElement: formElements.treeCanvas,
         layout,
         onPersonSelected: (person) => {
