@@ -234,12 +234,12 @@ function buildChartOption(layout) {
         width: viewWidth,
         height: viewHeight,
         silent: false,
-        focusNodeAdjacency: true,
+        focusNodeAdjacency: false,
         edgeSymbol: ['none', 'none'],
         edgeLabel: { show: false },
         lineStyle: { color: HIERARCHY_LINK_COLOR, width: 1.6, opacity: 0.85 },
         emphasis: {
-          focus: 'adjacency',
+          focus: 'self',
           scale: true
         },
         select: {
@@ -408,9 +408,6 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
           chart.dispatchAction({ type: 'downplay', seriesIndex: 0, dataIndex: previousIndex });
           chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: previousIndex });
         }
-      } else {
-        chart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
-        chart.dispatchAction({ type: 'unselect', seriesIndex: 0 });
       }
       ensureSelectionState(chart, personId);
       if (focusView) {
@@ -438,8 +435,8 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
       const dom = chart.getDom();
       const centerX = dom?.clientWidth ? dom.clientWidth / 2 : 0;
       const centerY = dom?.clientHeight ? dom.clientHeight / 2 : 0;
-      const dx = centerX - px;
-      const dy = centerY - py;
+      const dx = px - centerX;
+      const dy = py - centerY;
       chart.dispatchAction({ type: 'graphRoam', dx, dy });
       if (animate) {
         ensureSelectionState(chart, personId);
