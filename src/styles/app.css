@@ -151,50 +151,68 @@ body {
   overflow: hidden;
 }
 
-.f3 {
+.family-chart-container {
   height: 100%;
+  --background-color: transparent;
+  --text-color: #0f172a;
 }
 
-.f3 .cards_layer {
+.family-chart-container svg.main_svg {
+  background: transparent;
+}
+
+.family-chart-container .links_view .link {
+  stroke: rgba(148, 163, 184, 0.55);
+  stroke-width: 2px;
+}
+
+.family-chart-container .cards_layer {
   font-family: inherit;
 }
 
-.f3-card--male .f3-card-body {
-  background: linear-gradient(135deg, #1d4ed8, #2563eb);
-  color: #ffffff;
-  border-radius: 0.75rem;
-  box-shadow: 0 12px 30px rgba(29, 78, 216, 0.25);
-}
-
-.f3-card--female .f3-card-body {
-  background: linear-gradient(135deg, #ec4899, #f472b6);
-  color: #ffffff;
-  border-radius: 0.75rem;
-  box-shadow: 0 12px 30px rgba(236, 72, 153, 0.25);
-}
-
-.f3-card--unknown .f3-card-body {
-  background: linear-gradient(135deg, #94a3b8, #cbd5f5);
-  color: #111827;
-  border-radius: 0.75rem;
-  box-shadow: 0 12px 30px rgba(148, 163, 184, 0.25);
-}
-
-.f3-card {
+.family-chart-container .f3-card {
   background: transparent;
   border: none;
   box-shadow: none;
+  color: inherit;
 }
 
-.f3-card .card-inner {
+.family-chart-container .f3-card .card-inner {
   padding: 0;
-  background: transparent;
-  box-shadow: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 
-.f3-card-body {
-  padding: 0.75rem 0.85rem;
-  min-width: 9rem;
+.family-chart-container .f3-card-body {
+  padding: 0.85rem 0.95rem;
+  min-width: 10rem;
+  border-radius: 0.85rem;
+  border: 1px solid transparent;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.family-chart-container .f3-card.f3-card--male .f3-card-body {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+  color: #ffffff;
+  box-shadow: 0 12px 30px rgba(29, 78, 216, 0.22);
+}
+
+.family-chart-container .f3-card.f3-card--female .f3-card-body {
+  background: linear-gradient(135deg, #ec4899, #f472b6) !important;
+  color: #ffffff;
+  box-shadow: 0 12px 30px rgba(236, 72, 153, 0.22);
+}
+
+.family-chart-container .f3-card.f3-card--unknown .f3-card-body {
+  background: linear-gradient(135deg, #94a3b8, #cbd5f5) !important;
+  color: #111827;
+  box-shadow: 0 12px 30px rgba(148, 163, 184, 0.25);
+}
+
+.family-chart-container .f3-card:hover .f3-card-body,
+.family-chart-container .f3-card.f3-card--active .f3-card-body {
+  transform: translateY(-3px);
 }
 
 .f3-card-title {

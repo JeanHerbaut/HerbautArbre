@@ -68,6 +68,7 @@ function createCardTemplate() {
   }
   const card = chartInstance.setCardHtml();
   card.setStyle('rect');
+  card.setMiniTree(false);
   card.setOnCardUpdate(function (datum) {
     const cardElement = this.querySelector('.card');
     if (!cardElement) {
@@ -84,6 +85,12 @@ function createCardTemplate() {
     cardElement.classList.add('f3-card');
     cardElement.classList.remove('f3-card--female', 'f3-card--male', 'f3-card--unknown');
     cardElement.classList.add(genderClass);
+    const isMainCard = cardElement.classList.contains('card-main');
+    if (isMainCard) {
+      cardElement.classList.add('f3-card--active');
+    } else {
+      cardElement.classList.remove('f3-card--active');
+    }
   });
   card.setCardInnerHtmlCreator((datum) => {
     const payload = datum?.data || {};
@@ -118,6 +125,10 @@ function initializeChart() {
     throw new Error('Impossible de trouver le conteneur du graphique');
   }
   chartInstance = f3.createChart(chartContainer, chartData);
+  chartInstance.setCardXSpacing(160);
+  chartInstance.setCardYSpacing(110);
+  chartInstance.setTransitionTime(650);
+  chartInstance.setOrientationHorizontal();
   createCardTemplate();
   chartInstance.updateTree({ initial: true, tree_position: 'fit', transition_time: 600 });
 }
