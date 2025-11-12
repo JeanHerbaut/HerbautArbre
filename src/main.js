@@ -60,6 +60,7 @@ let pendingTreePosition = 'current';
 let lastViewportSize = null;
 let resizeObserver = null;
 let windowResizeHandler = null;
+let scheduledChartUpdateId = null;
 
 function measureCardDimensions() {
   if (typeof document === 'undefined' || !document.body) {
@@ -141,16 +142,30 @@ function scheduleChartUpdate(treePosition = 'current') {
   }
   chartUpdateScheduled = true;
   const triggerUpdate = () => {
+    scheduledChartUpdateId = null;
     chartUpdateScheduled = false;
     const nextTreePosition = pendingTreePosition;
     pendingTreePosition = 'current';
     chartInstance.updateTree({ tree_position: nextTreePosition, transition_time: 0 });
   };
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-    window.requestAnimationFrame(triggerUpdate);
+    scheduledChartUpdateId = window.requestAnimationFrame(triggerUpdate);
   } else {
     triggerUpdate();
   }
+}
+
+export function cancelScheduledChartUpdate() {
+  if (
+    scheduledChartUpdateId !== null &&
+    typeof window !== 'undefined' &&
+    typeof window.cancelAnimationFrame === 'function'
+  ) {
+    window.cancelAnimationFrame(scheduledChartUpdateId);
+  }
+  scheduledChartUpdateId = null;
+  chartUpdateScheduled = false;
+  pendingTreePosition = 'current';
 }
 
 function updateChartViewportSize(width, height, { force = false, schedule = true } = {}) {
@@ -574,6 +589,7 @@ function focusOnPerson(personId, { openModal = false } = {}) {
     return;
   }
   chartInstance.store.updateMainId(personId);
+  cancelScheduledChartUpdate();
   chartInstance.updateTree({ tree_position: 'main_to_middle', transition_time: 650 });
   if (openModal) {
     openPersonModal(personId);
