@@ -23,6 +23,13 @@ function sanitizeNotes(notes) {
     .filter((note) => note.length > 0);
 }
 
+function sanitizeText(value) {
+  if (!value || typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
 function sanitizeRelationIds(values) {
   if (!Array.isArray(values)) {
     return [];
@@ -43,24 +50,23 @@ function sanitizeRelationIds(values) {
   return sanitized;
 }
 
-function sanitizeDate(value) {
-  if (!value || typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
-}
-
 function normalizeIndividual(person) {
   const { firstName, lastName, displayName } = splitName(person?.name ?? '');
   const fallbackName = person?.name?.trim() ?? '';
+  const birth = person?.birth ?? {};
+  const death = person?.death ?? {};
   return {
     id: person?.id ?? crypto.randomUUID(),
-    gender: person?.gender === 'F' ? 'F' : 'M',
+    gender: person?.gender === 'F' ? 'F' : person?.gender === 'M' ? 'M' : 'U',
     firstName,
     lastName,
     displayName: displayName || fallbackName,
-    birthDate: sanitizeDate(person?.birth?.date),
-    deathDate: sanitizeDate(person?.death?.date),
+    birthDate: sanitizeText(birth?.date),
+    birthPlace: sanitizeText(birth?.place),
+    deathDate: sanitizeText(death?.date),
+    deathPlace: sanitizeText(death?.place),
+    generation: sanitizeText(person?.generation),
+    sosa: sanitizeText(person?.sosa),
     notes: sanitizeNotes(person?.annotations),
     parents: sanitizeRelationIds(person?.parents),
     spouses: sanitizeRelationIds(person?.spouses),
@@ -72,12 +78,17 @@ function toChartDatum(record) {
   return {
     id: record.id,
     data: {
+      id: record.id,
       gender: record.gender,
       firstName: record.firstName,
       lastName: record.lastName,
       displayName: record.displayName || [record.firstName, record.lastName].filter(Boolean).join(' '),
       birthDate: record.birthDate,
+      birthPlace: record.birthPlace,
       deathDate: record.deathDate,
+      deathPlace: record.deathPlace,
+      generation: record.generation,
+      sosa: record.sosa,
       notes: record.notes
     },
     rels: {
@@ -107,16 +118,22 @@ export function buildDisplayName(record) {
   if (!record) {
     return '';
   }
+  const preferred = record.displayName?.trim();
+  if (preferred) {
+    return preferred;
+  }
   const parts = [record.firstName, record.lastName].filter((part) => part && part.length > 0);
   if (parts.length > 0) {
     return parts.join(' ');
   }
-  return record.displayName || record.id;
+  return record.id;
 }
 
-export function formatDates(record) {
-  const birth = record?.birthDate ? `Né(e) : ${record.birthDate}` : '';
-  const death = record?.deathDate ? `Décédé(e) : ${record.deathDate}` : '';
+export function formatLifeEvents(record) {
+  const birthParts = [record?.birthDate, record?.birthPlace].filter((value) => value && value.length > 0);
+  const deathParts = [record?.deathDate, record?.deathPlace].filter((value) => value && value.length > 0);
+  const birth = birthParts.length > 0 ? `Naissance : ${birthParts.join(' — ')}` : '';
+  const death = deathParts.length > 0 ? `Décès : ${deathParts.join(' — ')}` : '';
   return [birth, death].filter(Boolean);
 }
 
@@ -130,8 +147,12 @@ export function createRecordFromForm(values, parentId) {
     firstName,
     lastName,
     displayName: [firstName, lastName].filter(Boolean).join(' ') || `${firstName || lastName || 'Nouvelle personne'}`,
-    birthDate: sanitizeDate(values.birthDate),
-    deathDate: sanitizeDate(values.deathDate),
+    birthDate: sanitizeText(values.birthDate),
+    birthPlace: '',
+    deathDate: sanitizeText(values.deathDate),
+    deathPlace: '',
+    generation: '',
+    sosa: '',
     notes,
     parents: parentId ? [parentId] : [],
     spouses: [],

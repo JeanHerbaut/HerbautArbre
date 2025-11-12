@@ -6,7 +6,7 @@ import {
   normalizeIndividuals,
   buildChartData,
   buildDisplayName,
-  formatDates,
+  formatLifeEvents,
   createRecordFromForm
 } from './data/format.js';
 import { setupDialog, openDialog, closeDialog } from './ui/dialog.js';
@@ -25,10 +25,18 @@ const addForm = document.querySelector('#add-person-form');
 const addParentSelect = document.querySelector('#add-parent');
 const focusRootButton = document.querySelector('#focus-root');
 const openAddModalButton = document.querySelector('#open-add-modal');
+const searchButton = document.querySelector('#search-button');
+const searchModal = setupDialog(document.querySelector('#search-modal'));
+const searchModalMessage = document.querySelector('#search-modal-message');
+const searchModalResults = document.querySelector('#search-modal-results');
 
 const searchPanel = createSearchPanel({
   input: document.querySelector('#search-input'),
   results: document.querySelector('#search-results'),
+  button: searchButton,
+  modal: searchModal,
+  modalMessage: searchModalMessage,
+  modalResults: searchModalResults,
   onSelect: (personId) => focusOnPerson(personId, { openModal: true })
 });
 
@@ -56,6 +64,16 @@ function createCardTemplate() {
   }
   const card = chartInstance.setCardHtml();
   card.setStyle('rect');
+  card.setCardClassCreator((datum) => {
+    const gender = (datum?.data?.gender || '').toUpperCase();
+    if (gender === 'F') {
+      return 'f3-card f3-card--female';
+    }
+    if (gender === 'M') {
+      return 'f3-card f3-card--male';
+    }
+    return 'f3-card f3-card--unknown';
+  });
   card.setCardInnerHtmlCreator((datum) => {
     const payload = datum?.data || {};
     const personId = payload?.id || datum?.id;
@@ -73,8 +91,11 @@ function createCardTemplate() {
   });
   card.setOnCardClick((event, datum) => {
     event?.stopPropagation();
-    focusOnPerson(datum.data.id);
-    openPersonModal(datum.data.id);
+    const targetId = datum?.data?.id || datum?.id;
+    if (targetId) {
+      focusOnPerson(targetId);
+      openPersonModal(targetId);
+    }
   });
 }
 
@@ -99,11 +120,23 @@ function openPersonModal(personId) {
   if (personModalMeta) {
     personModalMeta.innerHTML = '';
     const metaEntries = [];
-    if (record.birthDate) {
-      metaEntries.push({ label: 'Naissance', value: record.birthDate });
+    if (record.birthDate || record.birthPlace) {
+      metaEntries.push({
+        label: 'Naissance',
+        value: [record.birthDate, record.birthPlace].filter(Boolean).join(' — ')
+      });
     }
-    if (record.deathDate) {
-      metaEntries.push({ label: 'Décès', value: record.deathDate });
+    if (record.deathDate || record.deathPlace) {
+      metaEntries.push({
+        label: 'Décès',
+        value: [record.deathDate, record.deathPlace].filter(Boolean).join(' — ')
+      });
+    }
+    if (record.sosa) {
+      metaEntries.push({ label: 'Numéro Sosa', value: record.sosa });
+    }
+    if (record.generation) {
+      metaEntries.push({ label: 'Génération', value: record.generation });
     }
     if (metaEntries.length === 0) {
       const empty = document.createElement('p');
@@ -164,7 +197,11 @@ function refreshSearchIndex() {
   const entries = records.map((record) => ({
     id: record.id,
     label: buildDisplayName(record),
-    dates: formatDates(record).join(' — ')
+    dates: formatLifeEvents(record).join(' — '),
+    firstName: record.firstName,
+    lastName: record.lastName,
+    birthDate: record.birthDate,
+    birthPlace: record.birthPlace
   }));
   searchPanel.update(entries);
 }
