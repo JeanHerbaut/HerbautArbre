@@ -36,6 +36,11 @@ body {
   min-height: 100vh;
 }
 
+.app__layout--immersive {
+  gap: clamp(1rem, 3vw, 1.5rem);
+  padding: clamp(1rem, 4vw, 1.75rem);
+}
+
 .tree-node--highlight .tree-node__label {
   font-weight: 700;
   fill: #f2545b;

@@ -12,7 +12,7 @@ const DATA_URL = `${import.meta.env.BASE_URL}data/famille-herbaut.json`;
 const ROOT_PERSON_ID = 'S_3072';
 const DEFAULT_FOCUS_NAME = 'Jehan HERBAUT';
 const VERTICAL_TREE_QUERY = '(max-width: 768px)';
-const COARSE_POINTER_QUERY = '(pointer: coarse)';
+const FILTER_MODAL_TRANSITION = 220;
 
 const appElement = document.querySelector('#app');
 const modalElement = document.querySelector('#person-modal');
@@ -197,7 +197,7 @@ function buildPersonName({ firstName, lastName }) {
 
 function renderLayout() {
   appElement.innerHTML = `
-    <div class="app__layout">
+    <div class="app__layout app__layout--immersive">
       <section class="tree-view" aria-label="Arbre généalogique">
         <header class="tree-view__toolbar">
           <div class="tree-toolbar">
@@ -229,20 +229,58 @@ function renderLayout() {
           <div class="tree-view__chart" role="presentation"></div>
         </div>
       </section>
-      <aside class="search-panel" aria-labelledby="search-panel-title">
-        <div class="search-panel__container" id="search-panel-container"></div>
-      </aside>
+      <button
+        type="button"
+        class="filters-button"
+        data-filter-action="open"
+        aria-haspopup="dialog"
+        aria-controls="filters-modal"
+        aria-expanded="false"
+      >
+        Filtres
+      </button>
+      <div class="filters-modal" data-filter-modal hidden aria-hidden="true">
+        <div
+          class="filters-modal__dialog"
+          id="filters-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="filters-modal-title"
+          tabindex="-1"
+        >
+          <header class="filters-modal__header">
+            <h2 id="filters-modal-title" class="filters-modal__title">Filtres de recherche</h2>
+            <button
+              type="button"
+              class="filters-modal__close"
+              data-filter-action="close"
+              aria-label="Fermer les filtres"
+            >
+              Fermer
+            </button>
+          </header>
+          <div class="filters-modal__body">
+            <div class="search-panel" role="presentation">
+              <div class="search-panel__container" id="filters-modal-container"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
   return {
-    searchPanelContainer: appElement.querySelector('#search-panel-container'),
+    searchPanelContainer: appElement.querySelector('#filters-modal-container'),
     treeCanvas: appElement.querySelector('.tree-view__canvas'),
     treeChart: appElement.querySelector('.tree-view__chart'),
     zoomInButton: appElement.querySelector('[data-tree-action="zoom-in"]'),
     zoomOutButton: appElement.querySelector('[data-tree-action="zoom-out"]'),
     resetViewButton: appElement.querySelector('[data-tree-action="reset"]'),
-    addPersonButton: appElement.querySelector('[data-tree-action="add-person"]')
+    addPersonButton: appElement.querySelector('[data-tree-action="add-person"]'),
+    filtersButton: appElement.querySelector('[data-filter-action="open"]'),
+    filtersCloseButton: appElement.querySelector('[data-filter-action="close"]'),
+    filtersModal: appElement.querySelector('[data-filter-modal]'),
+    filtersDialog: appElement.querySelector('.filters-modal__dialog')
   };
 }
 
@@ -296,6 +334,9 @@ async function init() {
     let individuals = normalizeIndividuals(rawIndividuals);
     let relationships = Array.isArray(data.relationships) ? data.relationships : [];
     const formElements = renderLayout();
+    let openFilters = () => {};
+    let closeFilters = () => {};
+    let lastFilterTrigger = null;
     let treeApi = null;
     let currentLayoutMode = 'hierarchical';
     let currentLayoutOrientation = 'vertical';
@@ -451,6 +492,7 @@ async function init() {
           searchModal.close();
           return;
         }
+        closeFilters();
         const results = filterIndividuals(individuals, criteria);
         if (results.length === 1) {
           const [singleResult] = results;
@@ -467,10 +509,72 @@ async function init() {
     });
 
     searchPanel.mount(formElements.searchPanelContainer);
-    const shouldAutoFocusSearch =
-      typeof window === 'undefined' ? true : !window.matchMedia(COARSE_POINTER_QUERY).matches;
-    if (shouldAutoFocusSearch && typeof window !== 'undefined') {
-      window.requestAnimationFrame(() => searchPanel.focus());
+    const filtersModalElement = formElements.filtersModal;
+    const filtersDialogElement = formElements.filtersDialog;
+    const filtersButtonElement = formElements.filtersButton;
+    const filtersCloseButtonElement = formElements.filtersCloseButton;
+
+    closeFilters = () => {
+      if (!filtersModalElement || filtersModalElement.hasAttribute('hidden')) {
+        return;
+      }
+      filtersModalElement.classList.remove('filters-modal--open');
+      filtersModalElement.setAttribute('aria-hidden', 'true');
+      const restoreTarget = lastFilterTrigger;
+      window.setTimeout(() => {
+        filtersModalElement.setAttribute('hidden', 'true');
+        if (filtersButtonElement) {
+          filtersButtonElement.setAttribute('aria-expanded', 'false');
+        }
+        if (restoreTarget && typeof restoreTarget.focus === 'function') {
+          restoreTarget.focus({ preventScroll: true });
+        }
+        lastFilterTrigger = null;
+      }, FILTER_MODAL_TRANSITION);
+    };
+
+    openFilters = () => {
+      if (!filtersModalElement || !filtersModalElement.hasAttribute('hidden')) {
+        return;
+      }
+      lastFilterTrigger =
+        document.activeElement instanceof HTMLElement ? document.activeElement : filtersButtonElement;
+      filtersModalElement.removeAttribute('hidden');
+      filtersModalElement.setAttribute('aria-hidden', 'false');
+      if (filtersButtonElement) {
+        filtersButtonElement.setAttribute('aria-expanded', 'true');
+      }
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => {
+          filtersModalElement.classList.add('filters-modal--open');
+          filtersDialogElement?.focus({ preventScroll: true });
+          searchPanel.focus();
+        });
+        return;
+      }
+      filtersModalElement.classList.add('filters-modal--open');
+      filtersDialogElement?.focus({ preventScroll: true });
+      searchPanel.focus();
+    };
+
+    if (filtersButtonElement) {
+      filtersButtonElement.addEventListener('click', () => openFilters());
+    }
+    if (filtersCloseButtonElement) {
+      filtersCloseButtonElement.addEventListener('click', () => closeFilters());
+    }
+    if (filtersModalElement) {
+      filtersModalElement.addEventListener('click', (event) => {
+        if (event.target === filtersModalElement) {
+          closeFilters();
+        }
+      });
+      filtersModalElement.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeFilters();
+        }
+      });
     }
 
     if (typeof window !== 'undefined') {

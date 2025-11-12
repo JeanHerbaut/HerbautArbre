@@ -435,8 +435,8 @@ export function createTreeRenderer({ chartElement, containerElement, layout, onP
       const dom = chart.getDom();
       const centerX = dom?.clientWidth ? dom.clientWidth / 2 : 0;
       const centerY = dom?.clientHeight ? dom.clientHeight / 2 : 0;
-      const dx = px - centerX;
-      const dy = py - centerY;
+      const dx = centerX - px;
+      const dy = centerY - py;
       chart.dispatchAction({ type: 'graphRoam', dx, dy });
       if (animate) {
         ensureSelectionState(chart, personId);
