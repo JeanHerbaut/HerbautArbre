@@ -1,684 +1,469 @@
-import * as d3 from 'd3';
+import { createApp, defineComponent, h, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue';
+import VueECharts from 'vue-echarts';
+import { use } from 'echarts/core';
+import { GraphChart } from 'echarts/charts';
+import { TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { formatPersonDisplayName } from '../utils/person.js';
 
-const ZOOM_EXTENT = [0.12, 36];
-const FOCUS_TRANSITION_DURATION = 650;
-const ZOOM_TRANSITION_DURATION = 320;
-const FOCUS_MIN_SCALE = 2.1;
-const FOCUS_TARGET_SPAN = 260;
-const AUTO_FIT_PADDING = 0.35;
-const AUTO_FIT_MIN_SCALE = 0.9;
-const LABEL_MAX_LINE_LENGTH = 18;
+use([GraphChart, TooltipComponent, CanvasRenderer]);
 
-const LINK_TYPE_CLASS_MAP = new Map([
-  ['parent-child', 'parent'],
-  ['parentchild', 'parent'],
-  ['parent', 'parent'],
-  ['union', 'union'],
-  ['marriage', 'marriage'],
-  ['mariage', 'marriage'],
-  ['married', 'marriage'],
-  ['couple', 'union'],
-  ['spouse', 'union']
-]);
+const BRANCH_COLORS = ['#2c6e49', '#4c956c', '#386fa4', '#7f4f24', '#bc4749', '#9c89b8'];
+const HIERARCHY_LINK_COLOR = 'rgba(44, 110, 73, 0.35)';
+const UNION_LINK_COLOR = '#c96480';
+const SECONDARY_LINK_COLOR = '#9c89b8';
+const HIGHLIGHT_COLOR = '#f2545b';
 
-function polarToCartesian(angle, radius, center) {
-  if (!center || !Number.isFinite(angle) || !Number.isFinite(radius)) {
-    return null;
+function resolveBranchColor(branchIndex) {
+  if (!Number.isInteger(branchIndex)) {
+    return BRANCH_COLORS[0];
   }
-  const polarAngle = angle - Math.PI / 2;
-  return {
-    x: center.x + radius * Math.cos(polarAngle),
-    y: center.y + radius * Math.sin(polarAngle)
-  };
+  const normalized = ((branchIndex % BRANCH_COLORS.length) + BRANCH_COLORS.length) % BRANCH_COLORS.length;
+  return BRANCH_COLORS[normalized];
 }
 
-function buildLinkPath(link, center) {
-  const { source, target } = link;
-  if (!source || !target) {
+function resolveLabelPlacement(node, layout) {
+  const fallback = { position: 'right', offset: [14, 0] };
+  if (!node) {
+    return fallback;
+  }
+  if (layout?.orientation === 'radial' && typeof node.angle === 'number') {
+    const polarAngle = node.angle - Math.PI / 2;
+    const isLeft = Math.cos(polarAngle) < 0;
+    return {
+      position: isLeft ? 'left' : 'right',
+      offset: isLeft ? [-14, 0] : [14, 0]
+    };
+  }
+  if (layout?.orientation === 'vertical') {
+    const centerX = (layout?.dimensions?.width ?? 0) / 2;
+    const isLeft = Number.isFinite(centerX) && node.x > centerX;
+    return {
+      position: isLeft ? 'left' : 'right',
+      offset: isLeft ? [-14, 0] : [14, 0]
+    };
+  }
+  return fallback;
+}
+
+function buildLabelText(node) {
+  if (!node) {
     return '';
   }
-  if (link.type === 'parent-child') {
-    const path = d3.path();
-    path.moveTo(source.x, source.y);
-    if (
-      typeof source.angle === 'number' &&
-      typeof source.radius === 'number' &&
-      typeof target.angle === 'number' &&
-      typeof target.radius === 'number'
-    ) {
-      const midAngle = (source.angle + target.angle) / 2;
-      const midRadius = (source.radius + target.radius) / 2;
-      const midPoint = polarToCartesian(midAngle, midRadius, center);
-      if (midPoint) {
-        path.quadraticCurveTo(midPoint.x, midPoint.y, target.x, target.y);
-        return path.toString();
+  const fragments = [];
+  const label = node.person
+    ? formatPersonDisplayName(node.person) || node.person.name || node.person.id
+    : node.id;
+  if (label) {
+    fragments.push(label);
+  }
+  const meta = [];
+  if (node.person?.sosa) {
+    meta.push(`Sosa ${node.person.sosa}`);
+  }
+  if (node.generation != null) {
+    meta.push(`Génération ${node.generation}`);
+  }
+  if (meta.length > 0) {
+    fragments.push(meta.join(' • '));
+  }
+  return fragments.join('\n');
+}
+
+function buildTooltipContent(person) {
+  if (!person) {
+    return '';
+  }
+  const content = [];
+  const displayName = formatPersonDisplayName(person) || person.name || person.id;
+  if (displayName) {
+    content.push(`<strong>${displayName}</strong>`);
+  }
+  if (person.sosa) {
+    content.push(`<div><span>Sosa :</span> ${person.sosa}</div>`);
+  }
+  if (person.birth?.date || person.birth?.place) {
+    const birth = [person.birth?.date, person.birth?.place].filter(Boolean).join(' – ');
+    content.push(`<div><span>Naissance :</span> ${birth}</div>`);
+  }
+  if (person.death?.date || person.death?.place) {
+    const death = [person.death?.date, person.death?.place].filter(Boolean).join(' – ');
+    content.push(`<div><span>Décès :</span> ${death}</div>`);
+  }
+  if (person.parents) {
+    const parents = [person.parents.father, person.parents.mother].filter(Boolean).join(', ');
+    if (parents) {
+      content.push(`<div><span>Parents :</span> ${parents}</div>`);
+    }
+  }
+  if (person.spouses) {
+    const spouses = Array.isArray(person.spouses) ? person.spouses.join(', ') : person.spouses;
+    if (spouses) {
+      content.push(`<div><span>Conjoints :</span> ${spouses}</div>`);
+    }
+  }
+  return content.join('');
+}
+
+function buildChartNodes(layout) {
+  const nodes = Array.isArray(layout?.nodes) ? layout.nodes : [];
+  return nodes.map((node) => {
+    const branchColor = resolveBranchColor(node.branchIndex);
+    const labelPlacement = resolveLabelPlacement(node, layout);
+    const labelText = buildLabelText(node);
+    return {
+      id: node.person?.id ?? node.id,
+      value: node.person?.id ?? node.id,
+      name: labelText,
+      x: node.x,
+      y: node.y,
+      person: node.person ?? null,
+      nodeId: node.id,
+      branchIndex: node.branchIndex ?? null,
+      symbol: 'circle',
+      symbolSize: node.person ? 16 : 12,
+      itemStyle: {
+        color: branchColor,
+        borderColor: '#ffffff',
+        borderWidth: 2,
+        shadowBlur: 6,
+        shadowColor: 'rgba(31, 41, 51, 0.18)'
+      },
+      labelText,
+      tooltipHtml: buildTooltipContent(node.person ?? null),
+      label: {
+        show: true,
+        formatter: () => labelText,
+        position: labelPlacement.position,
+        offset: labelPlacement.offset,
+        color: '#1f2933',
+        backgroundColor: 'rgba(255, 255, 255, 0.82)',
+        borderRadius: 8,
+        padding: [4, 8],
+        fontSize: 12,
+        lineHeight: 16,
+        rich: {}
+      },
+      emphasis: {
+        label: {
+          show: true
+        }
       }
-    }
-    const midX = (source.x + target.x) / 2;
-    const midY = (source.y + target.y) / 2;
-    path.quadraticCurveTo(midX, midY, target.x, target.y);
-    return path.toString();
-  }
-  return `M${source.x},${source.y}L${target.x},${target.y}`;
-}
-
-function computeLabelOrientation(datum) {
-  if (!datum || typeof datum.angle !== 'number') {
-    return { anchor: 'start', offset: 18 };
-  }
-  const polarAngle = datum.angle - Math.PI / 2;
-  const isLeft = Math.cos(polarAngle) < 0;
-  return {
-    anchor: isLeft ? 'end' : 'start',
-    offset: isLeft ? -18 : 18
-  };
-}
-
-function nodeClasses(datum) {
-  const classes = ['tree-node'];
-  if (datum.person) {
-    classes.push('tree-node--person');
-  } else {
-    classes.push('tree-node--group');
-  }
-  if (typeof datum.branchIndex === 'number') {
-    classes.push(`tree-node--branch-${datum.branchIndex}`);
-  }
-  if (datum.person?.gender) {
-    const gender = datum.person.gender.toLowerCase();
-    if (gender === 'f' || gender === 'female') {
-      classes.push('tree-node--female');
-    } else if (gender === 'm' || gender === 'male') {
-      classes.push('tree-node--male');
-    }
-  }
-  return classes.join(' ');
-}
-
-function linkClassName(type) {
-  const normalized = String(type ?? 'relationship')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-  const preferred = LINK_TYPE_CLASS_MAP.get(normalized) ?? LINK_TYPE_CLASS_MAP.get(normalized.replace(/[^a-z0-9]+/g, ''));
-  if (preferred) {
-    return `tree-link tree-link--${preferred}`;
-  }
-  const fallback = normalized.replace(/[^a-z0-9]+/g, '-') || 'relationship';
-  return `tree-link tree-link--${fallback}`;
-}
-
-function splitLabelLines(label) {
-  if (!label) {
-    return [];
-  }
-  const sanitized = label.replace(/\s+/g, ' ').trim();
-  if (!sanitized) {
-    return [];
-  }
-  if (sanitized.length <= LABEL_MAX_LINE_LENGTH) {
-    return [sanitized];
-  }
-  const tokens = sanitized.split(' ');
-  const lines = [];
-  let currentLine = '';
-
-  const pushCurrent = () => {
-    if (currentLine) {
-      lines.push(currentLine);
-      currentLine = '';
-    }
-  };
-
-  tokens.forEach((token) => {
-    if (!token) {
-      return;
-    }
-    const candidate = currentLine ? `${currentLine} ${token}` : token;
-    const forceBreak = token.startsWith('(') && currentLine;
-    if (forceBreak) {
-      pushCurrent();
-      currentLine = token;
-      return;
-    }
-    if (candidate.length > LABEL_MAX_LINE_LENGTH && currentLine) {
-      pushCurrent();
-      currentLine = token;
-      return;
-    }
-    if (!currentLine && token.length > LABEL_MAX_LINE_LENGTH) {
-      lines.push(token);
-      currentLine = '';
-      return;
-    }
-    currentLine = candidate;
+    };
   });
-
-  pushCurrent();
-
-  if (!lines.length) {
-    lines.push(sanitized);
-  }
-
-  if (lines.length > 3) {
-    const first = lines[0];
-    const second = lines[1];
-    const remainder = lines.slice(2).join(' ');
-    return [first, second, remainder];
-  }
-
-  return lines;
 }
 
-function computeViewportCenterCoordinate(base, offset, viewportSpan, viewBoxSpan) {
-  const safeBase = Number.isFinite(base) ? base : 0;
-  const safeOffset = Number.isFinite(offset) ? offset : 0;
-  const safeViewportSpan = Number.isFinite(viewportSpan) && viewportSpan > 0
-    ? viewportSpan
-    : Number.isFinite(viewBoxSpan) && viewBoxSpan > 0
-    ? viewBoxSpan
-    : 0;
-  return safeBase + safeOffset + safeViewportSpan / 2;
+function buildLinkStyle(type) {
+  if (type === 'parent-child') {
+    return { color: HIERARCHY_LINK_COLOR, width: 1.8, opacity: 0.95 };
+  }
+  if (type === 'union' || type === 'marriage' || type === 'mariage' || type === 'couple' || type === 'spouse') {
+    return { color: UNION_LINK_COLOR, width: 2, type: 'dashed', opacity: 0.95 };
+  }
+  return { color: SECONDARY_LINK_COLOR, width: 1.4, type: 'dotted', opacity: 0.85 };
 }
 
-function resolveViewportCenter(metrics = {}) {
-  if (
-    metrics.viewCenter &&
-    Number.isFinite(metrics.viewCenter.x) &&
-    Number.isFinite(metrics.viewCenter.y)
-  ) {
-    return metrics.viewCenter;
-  }
-  const {
-    viewBoxX = 0,
-    viewBoxY = 0,
-    viewportWidth,
-    viewportHeight,
-    viewBoxWidth,
-    viewBoxHeight,
-    offsetX = 0,
-    offsetY = 0
-  } = metrics;
+function buildChartLinks(layout) {
+  const hierarchicalLinks = Array.isArray(layout?.hierarchicalLinks) ? layout.hierarchicalLinks : [];
+  const relationshipLinks = Array.isArray(layout?.relationshipLinks) ? layout.relationshipLinks : [];
+  return hierarchicalLinks
+    .concat(relationshipLinks)
+    .map((link) => ({
+      source: link.sourceId,
+      target: link.targetId,
+      value: link.type,
+      lineStyle: buildLinkStyle(link.type),
+      emphasis: {
+        lineStyle: {
+          width: (buildLinkStyle(link.type).width ?? 1.5) + 0.6
+        }
+      }
+    }));
+}
+
+function buildChartOption(layout) {
+  const chartNodes = buildChartNodes(layout);
+  const chartLinks = buildChartLinks(layout);
+  const bounds = layout?.bounds ?? { minX: 0, maxX: layout?.dimensions?.width ?? 0, minY: 0, maxY: layout?.dimensions?.height ?? 0 };
+  const padding = 48;
   return {
-    x: computeViewportCenterCoordinate(viewBoxX, offsetX, viewportWidth, viewBoxWidth),
-    y: computeViewportCenterCoordinate(viewBoxY, offsetY, viewportHeight, viewBoxHeight)
+    animation: false,
+    tooltip: {
+      trigger: 'item',
+      className: 'tree-chart__tooltip',
+      backgroundColor: 'rgba(255, 255, 255, 0.94)',
+      borderColor: '#d1d5db',
+      borderWidth: 1,
+      textStyle: { color: '#1f2933' },
+      formatter: (params) => {
+        const data = params?.data ?? {};
+        if (data.tooltipHtml) {
+          return data.tooltipHtml;
+        }
+        return params?.name ?? '';
+      }
+    },
+    grid: { left: '1%', right: '1%', top: '1%', bottom: '1%' },
+    xAxis: {
+      type: 'value',
+      min: (bounds.minX ?? 0) - padding,
+      max: (bounds.maxX ?? 0) + padding,
+      show: false,
+      scale: true
+    },
+    yAxis: {
+      type: 'value',
+      min: (bounds.minY ?? 0) - padding,
+      max: (bounds.maxY ?? 0) + padding,
+      show: false,
+      inverse: true,
+      scale: true
+    },
+    series: [
+      {
+        type: 'graph',
+        coordinateSystem: 'cartesian2d',
+        layout: 'none',
+        data: chartNodes,
+        links: chartLinks,
+        roam: true,
+        draggable: false,
+        silent: false,
+        focusNodeAdjacency: true,
+        edgeSymbol: ['none', 'none'],
+        edgeLabel: { show: false },
+        lineStyle: { color: HIERARCHY_LINK_COLOR, width: 1.6, opacity: 0.85 },
+        emphasis: {
+          focus: 'adjacency',
+          scale: true
+        },
+        select: {
+          itemStyle: {
+            borderColor: HIGHLIGHT_COLOR,
+            borderWidth: 3,
+            shadowBlur: 14,
+            shadowColor: 'rgba(242, 84, 91, 0.35)'
+          },
+          label: {
+            fontWeight: 'bold'
+          }
+        }
+      }
+    ]
   };
 }
 
-export function createTreeRenderer({ svgElement, containerElement, layout, onPersonSelected }) {
-  const { nodes, hierarchicalLinks, relationshipLinks, dimensions, nodeById, bounds, mode } = layout;
-  const layoutMode = mode ?? 'fan';
-  const layoutOrientation = layout.orientation ?? (layoutMode === 'fan' ? 'radial' : 'horizontal');
-  const preserveVerticalSpan = layoutMode === 'hierarchical' && layoutOrientation !== 'vertical';
-
-  const svg = d3.select(svgElement);
-  svg.selectAll('*').remove();
-  svg.attr('viewBox', `0 0 ${dimensions.width} ${dimensions.height}`);
-  svg.attr('role', 'presentation');
-  svg.style('cursor', 'grab');
-  svg.style('touch-action', 'none');
-  svg.attr('data-tree-layout', mode ?? 'fan');
-  if (layoutOrientation) {
-    svg.attr('data-tree-orientation', layoutOrientation);
-  } else {
-    svg.attr('data-tree-orientation', null);
+export function createTreeRenderer({ chartElement, containerElement, layout, onPersonSelected }) {
+  if (!chartElement) {
+    throw new Error('Tree renderer requires a valid chart element');
   }
 
   if (containerElement) {
-    if (layoutOrientation) {
-      containerElement.dataset.treeOrientation = layoutOrientation;
+    if (layout?.orientation) {
+      containerElement.dataset.treeOrientation = layout.orientation;
     } else {
       delete containerElement.dataset.treeOrientation;
     }
   }
 
-  const rootGroup = svg.append('g').attr('class', 'tree-canvas__viewport');
-  const linksGroup = rootGroup.append('g').attr('class', 'tree-links');
-  const relationshipsGroup = rootGroup.append('g').attr('class', 'tree-links tree-links--relationships');
-  const nodesGroup = rootGroup.append('g').attr('class', 'tree-nodes');
+  const mountElement = document.createElement('div');
+  mountElement.className = 'tree-chart__root';
+  mountElement.setAttribute('role', 'presentation');
+  chartElement.innerHTML = '';
+  chartElement.appendChild(mountElement);
 
-  const layoutCenter = {
-    x: dimensions.width / 2,
-    y: dimensions.height / 2
-  };
+  const optionRef = shallowRef(buildChartOption(layout));
+  const pendingActions = [];
+  let chartInstance = null;
+  let highlightedId = null;
+  const dataIndexByPersonId = new Map();
+  const positionByPersonId = new Map();
 
-  linksGroup
-    .selectAll('path')
-    .data(hierarchicalLinks)
-    .join('path')
-    .attr('class', (d) => linkClassName(d.type))
-    .attr('d', (d) => buildLinkPath(d, layoutCenter));
+  const chartNodes = Array.isArray(optionRef.value?.series?.[0]?.data)
+    ? optionRef.value.series[0].data
+    : [];
 
-  relationshipsGroup
-    .selectAll('path')
-    .data(relationshipLinks)
-    .join('path')
-    .attr('class', (d) => linkClassName(d.type))
-    .attr('d', (d) => buildLinkPath(d, layoutCenter));
-
-  const nodeElements = nodesGroup
-    .selectAll('g')
-    .data(nodes)
-    .join('g')
-    .attr('class', nodeClasses)
-    .attr('transform', (d) => `translate(${d.x}, ${d.y})`)
-    .attr('tabindex', (d) => (d.person ? 0 : null))
-    .attr('role', (d) => (d.person ? 'button' : null))
-    .attr('data-person-id', (d) => d.person?.id ?? null)
-    .attr('aria-label', (d) => {
-      if (!d.person) {
-        return null;
-      }
-      const displayName = formatPersonDisplayName(d.person);
-      return `Afficher les détails de ${displayName || d.person.id}`;
-    });
-
-  nodeElements
-    .append('circle')
-    .attr('class', 'tree-node__marker')
-    .attr('r', (d) => (d.person ? 12 : 9));
-
-  const labels = nodeElements
-    .append('text')
-    .attr('class', 'tree-node__label')
-    .attr('dy', '0.32em')
-    .attr('text-anchor', (d) => computeLabelOrientation(d).anchor)
-    .each(function (d) {
-      const orientation = computeLabelOrientation(d);
-      const label = d.person
-        ? formatPersonDisplayName(d.person) || d.person.id || d.id
-        : d.person?.id ?? d.person ?? d.id;
-      const lines = splitLabelLines(label);
-      const selection = d3.select(this);
-      selection.attr('x', orientation.offset);
-      selection.text(null);
-      const effectiveLines = lines.length > 0 ? lines : [label ?? ''];
-      effectiveLines.forEach((line, index) => {
-        selection
-          .append('tspan')
-          .attr('x', orientation.offset)
-          .attr('dy', index === 0 ? 0 : '1.1em')
-          .text(line);
-      });
-    });
-
-  labels
-    .filter((d) => Boolean(d.person?.sosa) || d.generation != null)
-    .append('tspan')
-    .attr('class', 'tree-node__subtitle')
-    .attr('x', (d) => computeLabelOrientation(d).offset)
-    .attr('dy', '1.2em')
-    .text((d) => {
-      const fragments = [];
-      if (d.person?.sosa) {
-        fragments.push(`Sosa ${d.person.sosa}`);
-      }
-      if (d.generation != null) {
-        fragments.push(`Génération ${d.generation}`);
-      }
-      return fragments.join(' • ');
-    });
-
-  const nodeElementMap = new Map();
-  nodeElements.each(function (d) {
-    if (d.person) {
-      nodeElementMap.set(d.person.id, this);
+  chartNodes.forEach((node, index) => {
+    const personId = node.person?.id ?? null;
+    if (personId) {
+      dataIndexByPersonId.set(personId, index);
+      positionByPersonId.set(personId, [node.x, node.y]);
     }
   });
 
-  let highlightedId = null;
-  let currentTransform = d3.zoomIdentity;
-
-  function setHighlight(personId, { focusNodeElement = false } = {}) {
-    nodeElements.classed('tree-node--highlight', (d) => d.person?.id === personId);
-    highlightedId = personId ?? null;
-    if (!focusNodeElement || !personId) {
+  const runWhenReady = (action) => {
+    if (chartInstance) {
+      action(chartInstance);
       return;
     }
-    const nodeElement = nodeElementMap.get(personId);
-    if (typeof nodeElement?.focus === 'function') {
-      nodeElement.focus({ preventScroll: true });
-    }
-  }
+    pendingActions.push(action);
+  };
 
-  function getViewportMetrics() {
-    const containerRect = containerElement?.getBoundingClientRect?.() ?? null;
-    const svgElementNode = svg.node();
-    const svgRect = svgElementNode?.getBoundingClientRect?.() ?? null;
-    const viewBoxBase = svgElementNode?.viewBox?.baseVal ?? null;
-    const viewBoxWidth = Number.isFinite(viewBoxBase?.width) && viewBoxBase.width > 0
-      ? viewBoxBase.width
-      : dimensions.width;
-    const viewBoxHeight = Number.isFinite(viewBoxBase?.height) && viewBoxBase.height > 0
-      ? viewBoxBase.height
-      : dimensions.height;
-    const viewBoxX = Number.isFinite(viewBoxBase?.x) ? viewBoxBase.x : 0;
-    const viewBoxY = Number.isFinite(viewBoxBase?.y) ? viewBoxBase.y : 0;
-    const widthRatio = Number.isFinite(svgRect?.width) && svgRect.width > 0 && viewBoxWidth > 0
-      ? svgRect.width / viewBoxWidth
-      : null;
-    const heightRatio = Number.isFinite(svgRect?.height) && svgRect.height > 0 && viewBoxHeight > 0
-      ? svgRect.height / viewBoxHeight
-      : null;
-    let renderScale = 1;
-    if (Number.isFinite(widthRatio) && Number.isFinite(heightRatio)) {
-      renderScale = Math.min(widthRatio, heightRatio);
-    } else if (Number.isFinite(widthRatio)) {
-      renderScale = widthRatio;
-    } else if (Number.isFinite(heightRatio)) {
-      renderScale = heightRatio;
-    }
-    if (!Number.isFinite(renderScale) || renderScale <= 0) {
-      renderScale = 1;
-    }
-    const offsetXPx = Number.isFinite(renderScale) && renderScale > 0 && Number.isFinite(svgRect?.width)
-      ? Math.max(0, (svgRect.width - viewBoxWidth * renderScale) / 2)
-      : 0;
-    const offsetYPx = Number.isFinite(renderScale) && renderScale > 0 && Number.isFinite(svgRect?.height)
-      ? Math.max(0, (svgRect.height - viewBoxHeight * renderScale) / 2)
-      : 0;
-    const offsetX = Number.isFinite(renderScale) && renderScale > 0
-      ? offsetXPx / renderScale
-      : 0;
-    const offsetY = Number.isFinite(renderScale) && renderScale > 0
-      ? offsetYPx / renderScale
-      : 0;
-    const candidateWidths = [
-      containerElement?.clientWidth,
-      containerRect?.width,
-      containerElement?.offsetWidth,
-      svgRect?.width
-    ].filter((value) => Number.isFinite(value) && value > 0);
-    const candidateHeights = [
-      containerElement?.clientHeight,
-      containerRect?.height,
-      containerElement?.offsetHeight,
-      svgRect?.height
-    ].filter((value) => Number.isFinite(value) && value > 0);
-    const width = candidateWidths.length > 0 ? Math.min(...candidateWidths) : 1;
-    const height = candidateHeights.length > 0 ? Math.min(...candidateHeights) : 1;
-    const scaleX = width / (dimensions.width || 1);
-    const scaleY = height / (dimensions.height || 1);
-    const effectiveScale = Math.max(Math.min(scaleX, scaleY), Number.EPSILON);
-    const safeRenderScale = Number.isFinite(renderScale) && renderScale > 0 ? renderScale : 1;
-    const offsetPxX = Number.isFinite(offsetX) ? offsetX * safeRenderScale : 0;
-    const offsetPxY = Number.isFinite(offsetY) ? offsetY * safeRenderScale : 0;
-    const visibleWidthPx = Number.isFinite(svgRect?.width)
-      ? Math.max(1, svgRect.width - offsetPxX * 2)
-      : Math.max(1, width * safeRenderScale);
-    const visibleHeightPx = Number.isFinite(svgRect?.height)
-      ? Math.max(1, svgRect.height - offsetPxY * 2)
-      : Math.max(1, height * safeRenderScale);
-    const viewportWidth = Math.max(1, visibleWidthPx / safeRenderScale);
-    const viewportHeight = Math.max(1, visibleHeightPx / safeRenderScale);
-    const safeViewBoxX = Number.isFinite(viewBoxX) ? viewBoxX : 0;
-    const safeViewBoxY = Number.isFinite(viewBoxY) ? viewBoxY : 0;
-    const safeSvgWidth = Number.isFinite(svgRect?.width)
-      ? svgRect.width
-      : viewportWidth * safeRenderScale;
-    const safeSvgHeight = Number.isFinite(svgRect?.height)
-      ? svgRect.height
-      : viewportHeight * safeRenderScale;
-    const centerXPx = safeSvgWidth / 2 - offsetPxX;
-    const centerYPx = safeSvgHeight / 2 - offsetPxY;
-    const rawCenterX = safeViewBoxX + centerXPx / safeRenderScale;
-    const rawCenterY = safeViewBoxY + centerYPx / safeRenderScale;
-    const fallbackCenterX = safeViewBoxX + viewportWidth / 2;
-    const fallbackCenterY = safeViewBoxY + viewportHeight / 2;
-    const centerX = Number.isFinite(rawCenterX) ? rawCenterX : fallbackCenterX;
-    const centerY = Number.isFinite(rawCenterY) ? rawCenterY : fallbackCenterY;
-    const viewCenter = { x: centerX, y: centerY };
-    return {
-      width,
-      height,
-      scaleX,
-      scaleY,
-      scale: effectiveScale,
-      viewportWidth,
-      viewportHeight,
-      viewBoxWidth,
-      viewBoxHeight,
-      viewBoxX,
-      viewBoxY,
-      renderScale,
-      offsetX,
-      offsetY,
-      viewCenter
-    };
-  }
-
-  function computeAutoFitTransform() {
-    const {
-      viewportWidth,
-      viewportHeight,
-      viewBoxWidth,
-      viewBoxHeight,
-      viewBoxX,
-      viewBoxY,
-      offsetX,
-      offsetY,
-      viewCenter
-    } = getViewportMetrics();
-    const fallbackViewportCenterX = computeViewportCenterCoordinate(viewBoxX, offsetX, viewportWidth, viewBoxWidth);
-    const fallbackViewportCenterY = computeViewportCenterCoordinate(viewBoxY, offsetY, viewportHeight, viewBoxHeight);
-    const safeViewportCenterX = Number.isFinite(viewCenter?.x) ? viewCenter.x : fallbackViewportCenterX;
-    const safeViewportCenterY = Number.isFinite(viewCenter?.y) ? viewCenter.y : fallbackViewportCenterY;
-    const layoutWidth = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
-      ? Math.max(bounds.maxX - bounds.minX, 1)
-      : dimensions.width;
-    const layoutHeight = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
-      ? Math.max(bounds.maxY - bounds.minY, 1)
-      : dimensions.height;
-    const paddedWidth = layoutWidth * (1 + AUTO_FIT_PADDING);
-    const paddedHeight = layoutHeight * (1 + AUTO_FIT_PADDING);
-    const ratios = [];
-    if (viewportWidth > 0) {
-      ratios.push(viewportWidth / paddedWidth);
-    }
-    if (viewportHeight > 0 && !preserveVerticalSpan) {
-      ratios.push(viewportHeight / paddedHeight);
-    }
-    let scale = ratios.length > 0 ? Math.min(...ratios) : 1;
-    if (!Number.isFinite(scale) || scale <= 0) {
-      scale = 1;
-    }
-    if (preserveVerticalSpan) {
-      scale = Math.max(0.45, Math.min(1.1, scale));
-    } else {
-      scale = Math.max(AUTO_FIT_MIN_SCALE, scale);
-    }
-    scale = Math.max(ZOOM_EXTENT[0], Math.min(ZOOM_EXTENT[1], scale));
-    const layoutCenterX = bounds && Number.isFinite(bounds.maxX) && Number.isFinite(bounds.minX)
-      ? (bounds.minX + bounds.maxX) / 2
-      : dimensions.width / 2;
-    const layoutCenterY = bounds && Number.isFinite(bounds.maxY) && Number.isFinite(bounds.minY)
-      ? (bounds.minY + bounds.maxY) / 2
-      : dimensions.height / 2;
-    let translateX = safeViewportCenterX - layoutCenterX * scale;
-    let translateY = safeViewportCenterY - layoutCenterY * scale;
-    if (preserveVerticalSpan && bounds) {
-      if (Number.isFinite(bounds.minY)) {
-        const marginTop = Number.isFinite(viewBoxHeight)
-          ? Math.min(120, Math.max(48, viewBoxHeight * 0.12))
-          : 72;
-        translateY = marginTop - bounds.minY * scale;
+  const handleChartReady = (chart) => {
+    chartInstance = chart;
+    pendingActions.splice(0).forEach((task) => {
+      try {
+        task(chartInstance);
+      } catch (error) {
+        console.error('Tree renderer task failed', error);
       }
-      if (Number.isFinite(bounds.minX) && Number.isFinite(bounds.maxX)) {
-        const horizontalCenter = (bounds.minX + bounds.maxX) / 2;
-        translateX = safeViewportCenterX - horizontalCenter * scale;
-      }
-    }
-    return d3.zoomIdentity.translate(translateX, translateY).scale(scale);
-  }
+    });
+  };
 
-  function applyTransform(targetTransform, { animate = true, duration = ZOOM_TRANSITION_DURATION } = {}) {
-    if (!targetTransform) {
+  const handleNodeClick = (params) => {
+    const person = params?.data?.person ?? null;
+    if (!person) {
       return;
     }
-    svg.interrupt();
-    const zoomTarget = animate ? svg.transition().duration(duration) : svg;
-    zoomTarget.call(zoomBehavior.transform, targetTransform);
-  }
+    focusOnIndividual(person.id, { animate: true });
+    onPersonSelected?.(person);
+  };
 
-  function focusOnIndividual(personId, { animate = true, focusNode = true } = {}) {
-    const node = nodeById.get(personId);
-    if (!node) {
+  const ChartRoot = defineComponent({
+    name: 'TreeChartRoot',
+    setup() {
+      const chartRef = ref(null);
+
+      onMounted(() => {
+        if (chartRef.value?.chart) {
+          handleChartReady(chartRef.value.chart);
+        }
+      });
+
+      onBeforeUnmount(() => {
+        chartInstance = null;
+      });
+
+      return () =>
+        h(VueECharts, {
+          ref: chartRef,
+          option: optionRef.value,
+          autoresize: true,
+          style: { width: '100%', height: '100%' },
+          onChartReady: handleChartReady,
+          onClick: handleNodeClick
+        });
+    }
+  });
+
+  const vueApp = createApp(ChartRoot);
+  vueApp.component('VChart', VueECharts);
+  vueApp.mount(mountElement);
+
+  const ensureSelectionState = (chart, personId) => {
+    if (!personId) {
+      return;
+    }
+    const dataIndex = dataIndexByPersonId.get(personId);
+    if (dataIndex == null) {
+      return;
+    }
+    chart.dispatchAction({ type: 'select', seriesIndex: 0, dataIndex });
+    chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex });
+  };
+
+  function highlightIndividual(personId, { focusView = true } = {}) {
+    const dataIndex = dataIndexByPersonId.get(personId);
+    if (dataIndex == null) {
+      highlightedId = null;
       return false;
     }
-    setHighlight(personId);
-    if (containerElement) {
-      if (typeof containerElement.scrollTo === 'function') {
-        containerElement.scrollTo({ left: 0, top: 0 });
+    const previousId = highlightedId;
+    highlightedId = personId;
+    runWhenReady((chart) => {
+      if (previousId && previousId !== personId) {
+        const previousIndex = dataIndexByPersonId.get(previousId);
+        if (previousIndex != null) {
+          chart.dispatchAction({ type: 'downplay', seriesIndex: 0, dataIndex: previousIndex });
+          chart.dispatchAction({ type: 'unselect', seriesIndex: 0, dataIndex: previousIndex });
+        }
       } else {
-        containerElement.scrollLeft = 0;
-        containerElement.scrollTop = 0;
+        chart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+        chart.dispatchAction({ type: 'unselect', seriesIndex: 0 });
       }
-    }
-    const { viewportWidth, viewportHeight, viewCenter } = getViewportMetrics();
-    const safeViewportWidth = Number.isFinite(viewportWidth) && viewportWidth > 0
-      ? viewportWidth
-      : dimensions.width;
-    const safeViewportHeight = Number.isFinite(viewportHeight) && viewportHeight > 0
-      ? viewportHeight
-      : dimensions.height;
-    const safeCenterX = Number.isFinite(viewCenter?.x) ? viewCenter.x : dimensions.width / 2;
-    const safeCenterY = Number.isFinite(viewCenter?.y) ? viewCenter.y : dimensions.height / 2;
-    const shortestSide = Math.min(safeViewportWidth, safeViewportHeight);
-    const desiredScale = Number.isFinite(shortestSide) && shortestSide > 0
-      ? shortestSide / FOCUS_TARGET_SPAN
-      : FOCUS_MIN_SCALE;
-    const baseScale = Math.max(FOCUS_MIN_SCALE, desiredScale);
-    const currentScale = Number.isFinite(currentTransform.k) && currentTransform.k > 0
-      ? currentTransform.k
-      : FOCUS_MIN_SCALE;
-    const unclampedScale = Math.max(baseScale, currentScale);
-    const targetScale = Math.max(
-      ZOOM_EXTENT[0],
-      Math.min(ZOOM_EXTENT[1], unclampedScale)
-    );
-    const translateX = safeCenterX - node.x * targetScale;
-    const translateY = safeCenterY - node.y * targetScale;
-    const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
-
-    applyTransform(targetTransform, { animate, duration: FOCUS_TRANSITION_DURATION });
-
-    if (focusNode) {
-      setHighlight(personId, { focusNodeElement: true });
-    }
+      ensureSelectionState(chart, personId);
+      if (focusView) {
+        focusOnIndividual(personId, { animate: true, ensureHighlight: false });
+      }
+    });
     return true;
   }
 
-  function adjustZoom(factor) {
-    const viewportMetrics = getViewportMetrics();
-    const { viewportWidth, viewportHeight } = viewportMetrics;
-    const { x: centerX, y: centerY } = resolveViewportCenter(viewportMetrics);
-    const safeCenterX = Number.isFinite(centerX) ? centerX : dimensions.width / 2;
-    const safeCenterY = Number.isFinite(centerY) ? centerY : dimensions.height / 2;
-    const targetScale = Math.max(
-      ZOOM_EXTENT[0],
-      Math.min(ZOOM_EXTENT[1], currentTransform.k * factor)
-    );
-    const center = currentTransform.invert([safeCenterX, safeCenterY]);
-    const translateX = safeCenterX - center[0] * targetScale;
-    const translateY = safeCenterY - center[1] * targetScale;
-    const targetTransform = d3.zoomIdentity.translate(translateX, translateY).scale(targetScale);
-    applyTransform(targetTransform);
-  }
-
-  function resetView({ animate = true, preserveFocus = false } = {}) {
-    if (highlightedId) {
-      const success = focusOnIndividual(highlightedId, {
-        animate,
-        focusNode: !preserveFocus
-      });
-      if (success) {
+  function focusOnIndividual(personId, { animate = true, ensureHighlight = true } = {}) {
+    const position = positionByPersonId.get(personId);
+    const dataIndex = dataIndexByPersonId.get(personId);
+    if (!position || dataIndex == null) {
+      return false;
+    }
+    if (ensureHighlight) {
+      highlightIndividual(personId, { focusView: false });
+    }
+    runWhenReady((chart) => {
+      const pixel = chart.convertToPixel({ seriesIndex: 0 }, position);
+      if (!Array.isArray(pixel)) {
         return;
       }
+      const [px, py] = pixel;
+      const dom = chart.getDom();
+      const centerX = dom?.clientWidth ? dom.clientWidth / 2 : 0;
+      const centerY = dom?.clientHeight ? dom.clientHeight / 2 : 0;
+      const dx = centerX - px;
+      const dy = centerY - py;
+      chart.dispatchAction({ type: 'graphRoam', dx, dy });
+      if (animate) {
+        ensureSelectionState(chart, personId);
+      }
+    });
+    highlightedId = personId;
+    return true;
+  }
+
+  function zoom(factor) {
+    runWhenReady((chart) => {
+      const dom = chart.getDom();
+      const originX = dom?.clientWidth ? dom.clientWidth / 2 : 0;
+      const originY = dom?.clientHeight ? dom.clientHeight / 2 : 0;
+      chart.dispatchAction({ type: 'graphRoam', zoom: factor, originX, originY });
+      if (highlightedId) {
+        ensureSelectionState(chart, highlightedId);
+      }
+    });
+  }
+
+  function resetView() {
+    runWhenReady((chart) => {
+      chart.dispatchAction({ type: 'restore' });
+      if (highlightedId) {
+        ensureSelectionState(chart, highlightedId);
+      }
+    });
+  }
+
+  function destroy() {
+    vueApp.unmount();
+    if (chartElement.contains(mountElement)) {
+      chartElement.removeChild(mountElement);
     }
-    const targetTransform = computeAutoFitTransform();
-    applyTransform(targetTransform, { animate });
-  }
-
-  function handleNodeActivate(event, datum) {
-    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') {
-      return;
+    chartElement.innerHTML = '';
+    highlightedId = null;
+    if (containerElement) {
+      delete containerElement.dataset.treeOrientation;
     }
-    event.preventDefault();
-    focusOnIndividual(datum.person.id, { animate: true });
-    onPersonSelected?.(datum.person);
   }
 
-  nodeElements
-    .filter((d) => Boolean(d.person))
-    .on('click', handleNodeActivate)
-    .on('keydown', handleNodeActivate);
-
-  function onZoom(event) {
-    currentTransform = event.transform;
-    rootGroup.attr('transform', currentTransform);
-  }
-
-  function onZoomStart() {
-    svg.style('cursor', 'grabbing');
-  }
-
-  function onZoomEnd() {
-    svg.style('cursor', 'grab');
-  }
-
-  const zoomBehavior = d3
-    .zoom()
-    .extent([[0, 0], [dimensions.width, dimensions.height]])
-    .scaleExtent(ZOOM_EXTENT)
-    .on('start', onZoomStart)
-    .on('zoom', onZoom)
-    .on('end', onZoomEnd);
-
-  svg.call(zoomBehavior);
-  resetView();
-
-  const resizeObserver = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => {
-        window.requestAnimationFrame(() => {
-          resetView({ animate: false, preserveFocus: true });
-        });
-      })
-    : null;
-
-  if (resizeObserver) {
-    resizeObserver.observe(containerElement);
-  }
-
-  const api = {
+  return {
+    destroy,
     focusOnIndividual,
-    highlightIndividual(personId, { focusView = true, animate = true, focusNode = true } = {}) {
-      if (!personId) {
-        setHighlight(null);
-        return false;
-      }
-      const node = nodeById.get(personId);
-      if (node && focusView) {
-        return focusOnIndividual(personId, { animate, focusNode });
-      }
-      setHighlight(personId, { focusNodeElement: focusNode });
-      return Boolean(node);
-    },
-    resetView,
+    highlightIndividual,
     zoomIn() {
-      adjustZoom(1.25);
+      zoom(1.25);
     },
     zoomOut() {
-      adjustZoom(0.8);
+      zoom(0.8);
     },
+    resetView,
     get highlightedId() {
       return highlightedId;
-    },
-    destroy() {
-      resizeObserver?.disconnect();
     }
   };
-
-  return api;
 }
