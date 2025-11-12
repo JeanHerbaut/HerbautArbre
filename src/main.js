@@ -31,7 +31,11 @@ const searchModalMessage = document.querySelector('#search-modal-message');
 const searchModalResults = document.querySelector('#search-modal-results');
 
 const searchPanel = createSearchPanel({
-  input: document.querySelector('#search-input'),
+  fields: {
+    lastName: document.querySelector('#search-last-name'),
+    firstName: document.querySelector('#search-first-name'),
+    birth: document.querySelector('#search-birth')
+  },
   results: document.querySelector('#search-results'),
   button: searchButton,
   modal: searchModal,
@@ -64,26 +68,36 @@ function createCardTemplate() {
   }
   const card = chartInstance.setCardHtml();
   card.setStyle('rect');
-  card.setCardClassCreator((datum) => {
-    const gender = (datum?.data?.gender || '').toUpperCase();
-    if (gender === 'F') {
-      return 'f3-card f3-card--female';
+  card.setOnCardUpdate(function (datum) {
+    const cardElement = this.querySelector('.card');
+    if (!cardElement) {
+      return;
     }
-    if (gender === 'M') {
-      return 'f3-card f3-card--male';
+    const record = recordById.get(datum?.data?.id ?? datum?.id ?? '');
+    const genderValue = (record?.gender || datum?.data?.data?.gender || '').toUpperCase();
+    let genderClass = 'f3-card--unknown';
+    if (genderValue === 'F') {
+      genderClass = 'f3-card--female';
+    } else if (genderValue === 'M') {
+      genderClass = 'f3-card--male';
     }
-    return 'f3-card f3-card--unknown';
+    cardElement.classList.add('f3-card');
+    cardElement.classList.remove('f3-card--female', 'f3-card--male', 'f3-card--unknown');
+    cardElement.classList.add(genderClass);
   });
   card.setCardInnerHtmlCreator((datum) => {
     const payload = datum?.data || {};
     const personId = payload?.id || datum?.id;
     const record = personId ? recordById.get(personId) : null;
-    const name = buildDisplayName(record) || payload.displayName || personId;
-    const birth = payload.birthDate ? `° ${payload.birthDate}` : '';
-    const death = payload.deathDate ? `† ${payload.deathDate}` : '';
+    const dataDetails = payload?.data || {};
+    const name = buildDisplayName(record) || dataDetails.displayName || personId;
+    const birthSource = record?.birthDate || dataDetails.birthDate || '';
+    const deathSource = record?.deathDate || dataDetails.deathDate || '';
+    const birth = birthSource ? `° ${birthSource}` : '';
+    const death = deathSource ? `† ${deathSource}` : '';
     const dates = [birth, death].filter(Boolean).join('<br />');
     return `
-      <div class="f3-card-body">
+      <div class="card-inner f3-card-body">
         <div class="f3-card-title">${name || datum.id}</div>
         ${dates ? `<div class="f3-card-subtitle">${dates}</div>` : ''}
       </div>
