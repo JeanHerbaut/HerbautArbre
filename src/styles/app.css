@@ -157,8 +157,8 @@ body {
 }
 
 .family-chart-container .links_view path {
-  stroke: rgba(71, 85, 105, 0.68);
-  stroke-width: 2.75px;
+  stroke: rgba(30, 41, 59, 0.62);
+  stroke-width: 3px;
   stroke-linecap: round;
   fill: none;
 }
@@ -166,7 +166,12 @@ body {
 .family-chart-container .links_view path.marriage,
 .family-chart-container .links_view path[stroke-dasharray] {
   stroke-dasharray: 6 4;
-  opacity: 0.75;
+  opacity: 0.85;
+}
+
+.family-chart-container .links_view path.f3-path-to-main {
+  stroke: #2563eb;
+  stroke-width: 3.25px;
 }
 
 .family-chart-container .cards_layer {
