@@ -150,10 +150,19 @@ body {
   box-shadow: 0 25px 55px rgba(15, 23, 42, 0.12);
   padding: 1.25rem;
   overflow: hidden;
+  position: relative;
 }
 
 .family-chart-container svg.main_svg {
   background: transparent;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.family-chart-container #f3Canvas {
+  width: 100%;
+  height: 100%;
 }
 
 .family-chart-container .links_view path {
