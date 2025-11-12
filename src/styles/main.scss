@@ -150,8 +150,14 @@ body {
   padding: 0.6rem 0.75rem;
   font-size: 0.95rem;
   background-color: #ffffff;
+  color: var(--color-text);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   width: 100%;
+}
+
+.add-person-modal__input::placeholder {
+  color: var(--color-muted);
+  opacity: 1;
 }
 
 .add-person-modal__input:focus-visible {
